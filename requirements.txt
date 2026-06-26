@@ -1,0 +1,7 @@
+# EmotiCompanion —— 框架与集成层依赖
+# 各成员的真实模型依赖（deepface / transformers / audiocraft 等）
+# 请各自加到自己的模块说明里，这里只列运行框架本身所需的最小依赖。
+
+# Gradio：gr.Timer / gr.skip() / 流式输入需要 4.39+
+gradio>=4.39
+numpy>=1.24
