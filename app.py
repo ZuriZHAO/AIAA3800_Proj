@@ -215,6 +215,7 @@ def build_ui():
         # 跨回调共享的会话状态
         last_key = gr.State(None)    # 上一次的 (emotion, fatigue)，用于判断是否换音乐
         audio_buf = gr.State([])     # 麦克风流式音频缓冲（numpy chunk 列表）
+        last_frame = gr.State(None)  # 摄像头最近一帧（stream 写入，timer 读取）
 
         mode = gr.Radio(
             ["Auto (continuous)", "Manual (one-shot)"],
@@ -258,21 +259,34 @@ def build_ui():
         outputs = [heatmap_out, perception_out, fusion_out, reasoning_out, music_out]
 
         # ---------------- 自动模式的数据流 ----------------
-        # 麦克风流式输入：numpy chunk 持续累积进缓冲
+        # 思路：摄像头/麦克风各自用 stream 把「最新数据」写进 State（这一步只更新 State，
+        # 不碰输出区，payload 简单不易被拒）；再由一个 gr.Timer 周期性读 State 跑 pipeline。
+        # 这样定时器读到的是 State 里的真实帧，而不是流式组件的 None。
+
+        # 摄像头：每帧把画面写进 last_frame（lambda 原样返回）
+        auto_cam.stream(
+            fn=lambda frame: frame,
+            inputs=[auto_cam],
+            outputs=[last_frame],
+            stream_every=1,
+            show_progress="hidden",
+        )
+
+        # 麦克风：numpy chunk 持续累积进 audio_buf
         auto_mic.stream(
             fn=accumulate_audio,
             inputs=[auto_mic, audio_buf],
             outputs=[audio_buf],
             stream_every=1,
+            show_progress="hidden",
         )
 
-        # 摄像头流式输入直接驱动 pipeline：每帧直接送进 auto_step（不经 State 中转，
-        # 避免定时器读到 None 导致输出一直不刷新）。stream_every 控制处理频率。
-        cam_stream = auto_cam.stream(
+        # 心跳定时器：每 AUTO_INTERVAL_SEC 秒读 State 跑一次 pipeline
+        timer = gr.Timer(AUTO_INTERVAL_SEC)
+        timer.tick(
             fn=auto_step,
-            inputs=[auto_cam, audio_buf, last_key],
+            inputs=[last_frame, audio_buf, last_key],
             outputs=outputs + [last_key, audio_buf],
-            stream_every=AUTO_INTERVAL_SEC,
             show_progress="hidden",
         )
 
@@ -284,6 +298,14 @@ def build_ui():
         )
 
         # ---------------- 模式切换 ----------------
+        def switch_mode(m):
+            is_auto = m.startswith("Auto")
+            return (gr.update(visible=is_auto),                  # auto_group
+                    gr.update(visible=not is_auto),              # manual_group
+                    gr.Timer(AUTO_INTERVAL_SEC, active=is_auto)) # 计时器仅自动模式运行
+
+        mode.change(fn=switch_mode, inputs=[mode],
+                    outputs=[auto_group, manual_group, timer])
         def switch_mode(m):
             is_auto = m.startswith("Auto")
             return (gr.update(visible=is_auto),       # auto_group
