@@ -1,0 +1,16 @@
+# M1 模块（face_emotion.py：① 人脸情绪 + ⑦ GradCAM）的依赖
+# 在 3800 环境（python=3.10）里安装。框架本身的依赖见根目录 requirements.txt。
+#
+# ⚠️ timm 必须钉在 0.9.16：HSEmotion 的权重是用 timm 0.9.x 序列化的整模型 pickle，
+#    timm 太新(1.0+) 会在 forward 报 'conv_s2d' 缺失，太旧(0.6) 又缺 'timm.layers'。
+# ⚠️ torch>=2.6 默认 weights_only=True 无法加载该 pickle，代码里已在加载时临时关闭。
+
+# torch / torchvision：按你的 CUDA 版本从 https://pytorch.org 选装（已确认本机有 GPU）。
+#   CPU 版示例： pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+
+timm==0.9.16
+hsemotion
+opencv-python
+numpy
