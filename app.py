@@ -40,6 +40,15 @@ import tempfile
 import time
 import wave
 
+# 让本地回环地址绕过系统/环境代理。否则开了科学上网（系统代理指向
+# 127.0.0.1:xxxx）时，gradio 启动后自检 http://127.0.0.1 的请求会被代理
+# 拦截返回 502，导致 app.launch() 直接抛异常退出。在这里把 localhost 加进
+# no_proxy，对所有组员（无论是否开代理）都安全生效。
+for _v in ("no_proxy", "NO_PROXY"):
+    _cur = os.environ.get(_v, "")
+    _need = "127.0.0.1,localhost,::1"
+    os.environ[_v] = f"{_cur},{_need}" if _cur else _need
+
 import numpy as np
 import gradio as gr
 
