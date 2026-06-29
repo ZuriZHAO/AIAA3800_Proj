@@ -8,15 +8,19 @@ config.py —— EmotiCompanion 全局配置与常量
     from config import EMOTION_LABELS, FATIGUE_LEVELS, FUSION_SCHEMA_EXAMPLE, AUTO_INTERVAL_SEC
 """
 
-# 各模态可能的情绪标签（与 Lab 模型输出对齐，替换真实模型后按需调整）
-EMOTION_LABELS = ["happy", "sad", "angry", "anxious", "neutral", "tired", "excited"]
+# 全队统一的情绪「契约词表」—— Ekman 标准 7 类基本情绪。
+# 人脸(①HSEmotion/AffectNet-8) 与 语音(③EmotionThinker) 的原生输出都映射进这一套，
+# 这样融合层 ④ 的按情绪投票才能跨模态互相印证。各感知模块负责把自己的原生标签
+# 映射到这里（人脸映射见 face_emotion.py，语音映射由 M2 在 speech_emotion.py 实现）。
+# 注意：疲劳/困倦是独立的一维，见下面 FATIGUE_LEVELS，不要混进情绪词表。
+EMOTION_LABELS = ["neutral", "happy", "sad", "angry", "fear", "surprise", "disgust"]
 
 # 疲劳/压力等级
 FATIGUE_LEVELS = ["low", "medium", "high"]
 
 # 融合输出的标准格式示例（来自规划文档 §2.1），所有成员对齐此 schema
 FUSION_SCHEMA_EXAMPLE = {
-    "dominant_emotion": "anxious",
+    "dominant_emotion": "fear",
     "confidence": 0.74,
     "fatigue": "high",
     "face_conf": 0.78,
@@ -27,8 +31,9 @@ FUSION_SCHEMA_EXAMPLE = {
 # 自动模式：每隔多少秒捕捉一次照片 / 处理一段录音
 AUTO_INTERVAL_SEC = 5
 
-# 被「舒缓类」音乐对待的情绪（用于 mock LLM 决策，真实模型可忽略）
-SOOTHE_EMOTIONS = ("anxious", "angry", "tired", "sad")
+# 被「舒缓类」音乐对待的负面/低效价情绪（用于 mock LLM 决策，真实模型可忽略）。
+# surprise 唤醒度可正可负，不一概归入舒缓；困倦由 fatigue=="high" 单独触发。
+SOOTHE_EMOTIONS = ("sad", "angry", "fear", "disgust")
 
 # ---- mock 占位行为（真实模块未就绪时的固定回退，不使用随机）----
 # 真实模块没写好时，感知一律返回下面这个固定的「舒缓」状态，

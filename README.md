@@ -108,7 +108,7 @@ EmotiCompanion module loading status:
 
 ```json
 {
-  "dominant_emotion": "anxious",
+  "dominant_emotion": "fear",
   "confidence": 0.74,
   "fatigue": "high",
   "face_conf": 0.78,
@@ -118,6 +118,8 @@ EmotiCompanion module loading status:
 ```
 
 三路输入（人脸情绪、语音情绪、疲劳状态）各自带 confidence score，动态加权后输出统一状态 JSON，交给 ⑤ 的 LLM 推理层。
+
+> **情绪词表（全队契约）**：`dominant_emotion` 取值统一为 Ekman 标准 7 类 —— `neutral / happy / sad / angry / fear / surprise / disgust`（见 `config.EMOTION_LABELS`）。各感知模块把自己模型的原生标签**映射进这套词表**：人脸 ①（AffectNet-8）的映射见 `face_emotion.py`，语音 ③（EmotionThinker）的映射由 M2 在 `speech_emotion.py` 实现。困倦不属于情绪轴，单独走 `fatigue` 字段。
 
 ---
 
