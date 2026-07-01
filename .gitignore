@@ -1,3 +1,7 @@
+# EmotiCompanion 实验数据（RAVDESS 视频等，勿入库；见 scripts/prepare_ravdess.py）
+data/
+*.mp4
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
