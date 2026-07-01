@@ -121,6 +121,8 @@ EmotiCompanion module loading status:
 
 > **情绪词表（全队契约）**：`dominant_emotion` 取值统一为 Ekman 标准 7 类 —— `neutral / happy / sad / angry / fear / surprise / disgust`（见 `config.EMOTION_LABELS`）。各感知模块把自己模型的原生标签**映射进这套词表**：人脸 ①（AffectNet-8）的映射见 `face_emotion.py`，语音 ③（EmotionThinker）的映射由 M2 在 `speech_emotion.py` 实现。困倦不属于情绪轴，单独走 `fatigue` 字段。
 
+> ⚠️ **【待解决 · M2】语音情绪的 confidence 从哪里来？** 置信度加权融合 ④ 需要每个模态给出置信度：人脸有 softmax 概率，但语音 EmotionThinker 是输出 `<answer>标签</answer>` 的推理模型，**本身不给概率**。若语音无可用置信度，加权融合会退化成只由人脸驱动，消融实验的「置信度加权 > 朴素融合」一臂也就不成立。**M2 需尽快确定方案**（如 token logprob / 让模型自评置信度 / 按验证集给每个模态固定可靠性权重）。详见 [experiment_plan.md](experiment_plan.md)。
+
 ---
 
 ## 5. 目录结构
