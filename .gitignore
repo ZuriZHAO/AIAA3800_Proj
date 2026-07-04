@@ -220,3 +220,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# --- M2 local files / speech-fusion experiments ---
+.env.*
+!.env.example
+
+RAVDESS/
+MELD/
+MELD.Raw/
+MELD-RAW/
+data/ravdess/
+
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.ogg
+*.webm
+
+*.pt
+*.pth
+*.ckpt
+*.safetensors
