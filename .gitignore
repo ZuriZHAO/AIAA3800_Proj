@@ -2,6 +2,11 @@
 data/
 *.mp4
 
+# M3 生成的音频输出（music_gen.py → outputs/）
+outputs/
+*.wav
+*.mp3
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,0 +1,22 @@
+# M3 模块（llm_reason.py + music_gen.py）的依赖
+# 在 3800 环境里安装。框架本身的依赖见根目录 requirements.txt。
+#
+# 包含：
+#   · 音乐生成 MusicGen（Hugging Face Transformers）
+#   · 可选 LLM 后端（OpenAI SDK，兼容 DeepSeek API）
+#
+# MusicGen 首次运行会从 Hugging Face 下载 facebook/musicgen-small 权重。
+# torch / torchaudio：按你的 CUDA 版本从 https://pytorch.org 选装。
+#   CPU 版示例： pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# ---- 音乐生成 (music_gen.py) ----
+transformers>=4.31.0
+accelerate
+scipy
+soundfile
+numpy
+torch
+torchaudio
+
+# ---- LLM 推理 (llm_reason.py · OpenAI / DeepSeek) ----
+openai>=1.0.0
