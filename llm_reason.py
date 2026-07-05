@@ -30,6 +30,15 @@ import os
 import re
 import textwrap
 
+# 从项目根目录的 .env 读取 LLM 后端配置（EMOTI_LLM_BACKEND / DEEPSEEK_API_KEY 等）。
+# 与 speech_emotion.py 保持一致：统一从 .env 拿 key，不必每次在命令行 $env: 手动设。
+# python-dotenv 未安装也不报错，退化为只认系统环境变量。
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Constants & schema
 # ---------------------------------------------------------------------------

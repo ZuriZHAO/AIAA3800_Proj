@@ -49,6 +49,12 @@ for _v in ("no_proxy", "NO_PROXY"):
     _need = "127.0.0.1,localhost,::1"
     os.environ[_v] = f"{_cur},{_need}" if _cur else _need
 
+# 绕过 Anaconda 常见的 OpenMP 运行时冲突（OMP: Error #15: libiomp5md.dll
+# already initialized）。多个库（numpy/mkl、torch、mediapipe 等）各自静态链了一份
+# OpenMP，加载时会撞车导致进程直接崩退。这里在任何重依赖 import 之前把它设成 TRUE，
+# 允许重复加载（官方标注为 unsafe 但对本项目实测稳定，不设则常常起不来）。
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import numpy as np
 import gradio as gr
 
@@ -215,7 +221,6 @@ def build_ui():
         # 跨回调共享的会话状态
         last_key = gr.State(None)    # 上一次的 (emotion, fatigue)，用于判断是否换音乐
         audio_buf = gr.State([])     # 麦克风流式音频缓冲（numpy chunk 列表）
-        last_frame = gr.State(None)  # 摄像头最近一帧（stream 写入，timer 读取）
 
         mode = gr.Radio(
             ["Auto (continuous)", "Manual (one-shot)"],
@@ -259,20 +264,15 @@ def build_ui():
         outputs = [heatmap_out, perception_out, fusion_out, reasoning_out, music_out]
 
         # ---------------- 自动模式的数据流 ----------------
-        # 思路：摄像头/麦克风各自用 stream 把「最新数据」写进 State（这一步只更新 State，
-        # 不碰输出区，payload 简单不易被拒）；再由一个 gr.Timer 周期性读 State 跑 pipeline。
-        # 这样定时器读到的是 State 里的真实帧，而不是流式组件的 None。
+        # 关键（本项目踩过的坑，见 代码说明.md，勿改回）：
+        #   摄像头 stream 必须「直接驱动」pipeline，绝不能用 gr.Timer 去读中转 State。
+        #   早期用 Timer 读 last_frame(State) 时，Timer 在独立事件里读回的是 None，
+        #   auto_step 一直走「image is None → 全 skip」分支，输出区永远不刷新
+        #   （症状：相机/麦克风都正常，但没有运行与输出）。
+        #   正确做法：auto_cam.stream(fn=auto_step, ..., stream_every=AUTO_INTERVAL_SEC)，
+        #   每 AUTO_INTERVAL_SEC 秒把「最新一帧」作为参数直接送进来，不会是 None。
 
-        # 摄像头：每帧把画面写进 last_frame（lambda 原样返回）
-        auto_cam.stream(
-            fn=lambda frame: frame,
-            inputs=[auto_cam],
-            outputs=[last_frame],
-            stream_every=1,
-            show_progress="hidden",
-        )
-
-        # 麦克风：numpy chunk 持续累积进 audio_buf
+        # 麦克风：numpy chunk 持续累积进 audio_buf（触发时由 auto_step 合并成 wav）
         auto_mic.stream(
             fn=accumulate_audio,
             inputs=[auto_mic, audio_buf],
@@ -281,12 +281,13 @@ def build_ui():
             show_progress="hidden",
         )
 
-        # 心跳定时器：每 AUTO_INTERVAL_SEC 秒读 State 跑一次 pipeline
-        timer = gr.Timer(AUTO_INTERVAL_SEC)
-        timer.tick(
+        # 摄像头：每 AUTO_INTERVAL_SEC 秒把最新帧直接送进 auto_step 跑完整 pipeline，
+        # 并带上累积的 audio_buf 与上一轮 last_key；auto_step 跑完会清空 audio_buf。
+        auto_cam.stream(
             fn=auto_step,
-            inputs=[last_frame, audio_buf, last_key],
+            inputs=[auto_cam, audio_buf, last_key],
             outputs=outputs + [last_key, audio_buf],
+            stream_every=AUTO_INTERVAL_SEC,
             show_progress="hidden",
         )
 
@@ -298,14 +299,8 @@ def build_ui():
         )
 
         # ---------------- 模式切换 ----------------
-        def switch_mode(m):
-            is_auto = m.startswith("Auto")
-            return (gr.update(visible=is_auto),                  # auto_group
-                    gr.update(visible=not is_auto),              # manual_group
-                    gr.Timer(AUTO_INTERVAL_SEC, active=is_auto)) # 计时器仅自动模式运行
-
-        mode.change(fn=switch_mode, inputs=[mode],
-                    outputs=[auto_group, manual_group, timer])
+        # 只切换两个区域的可见性即可：切到手动时自动区（含流式摄像头）隐藏，
+        # 摄像头停止推流，auto_step 自然不再触发；切回自动时恢复。
         def switch_mode(m):
             is_auto = m.startswith("Auto")
             return (gr.update(visible=is_auto),       # auto_group
