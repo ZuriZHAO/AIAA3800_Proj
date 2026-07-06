@@ -56,11 +56,13 @@ _DEVICE = None      # 'cuda' or 'cpu'
 _FER = None         # HSEmotionRecognizer
 _CASCADE = None     # OpenCV Haar 人脸检测器
 _TF = None          # torchvision 预处理（gradcam 手动前向时用）
+_CLS_W = None       # 情绪分类器权重 (8,1280) torch tensor —— Grad-CAM 对情绪类别求梯度用
+_CLS_B = None       # 情绪分类器偏置 (8,)
 
 
 def _lazy_init():
     """首次调用时加载模型、检测器、预处理；已加载则直接返回。"""
-    global _DEVICE, _FER, _CASCADE, _TF
+    global _DEVICE, _FER, _CASCADE, _TF, _CLS_W, _CLS_B
     if _FER is not None:
         return
 
@@ -85,6 +87,12 @@ def _lazy_init():
         torch.load = _orig_load
 
     _FER.model.eval()
+
+    # HSEmotion 的 model.classifier 是 Identity，model(x) 只输出 1280 维特征；
+    # 8 类情绪 logits = features @ W.T + b（W/b 是 recognizer 上的 numpy 分类器）。
+    # 缓存成 torch tensor，Grad-CAM 才能对「情绪类别分数」而非特征通道求梯度。
+    _CLS_W = torch.tensor(_FER.classifier_weights, dtype=torch.float32, device=_DEVICE)
+    _CLS_B = torch.tensor(_FER.classifier_bias, dtype=torch.float32, device=_DEVICE)
 
     _CASCADE = cv2.CascadeClassifier(
         cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -160,49 +168,83 @@ def predict(image):
 # ⑦ GradCAM —— 对 ① 用的同一个模型做可解释
 # =============================================================================
 
+def _raw_cam(face):
+    """在 face crop 上算归一化 2D Grad-CAM（0..1）。返回 (cam[H,W] float, cls, confidence)。"""
+    import torch
+    import cv2
+
+    model = _FER.model
+    tensor = _TF(face).unsqueeze(0).to(_DEVICE)
+    tensor.requires_grad_(True)
+
+    # 在最后一层卷积后的特征图(bn2)上挂前向/反向 hook
+    store = {}
+    target = model.bn2
+    h1 = target.register_forward_hook(
+        lambda m, i, o: store.__setitem__("act", o))
+    h2 = target.register_full_backward_hook(
+        lambda m, gi, go: store.__setitem__("grad", go[0]))
+    try:
+        feats = model(tensor)                             # (1, 1280) 池化后特征（classifier=Identity）
+        logits = feats @ _CLS_W.t() + _CLS_B              # (1, 8) 情绪 logits
+        probs = torch.softmax(logits, dim=1)[0]
+        cls = int(probs.argmax().item())                  # 0..7，对得上 idx_to_class
+        conf = float(probs[cls].item())
+        model.zero_grad(set_to_none=True)
+        logits[0, cls].backward()                         # 对「情绪类别」求梯度
+    finally:
+        h1.remove()
+        h2.remove()
+
+    acts = store["act"][0]                                # (C, h, w)
+    grads = store["grad"][0]                              # (C, h, w)
+    weights = grads.mean(dim=(1, 2))                      # (C,) 梯度全局平均池化
+    cam = torch.relu((weights[:, None, None] * acts).sum(dim=0))  # (h, w)
+    cam = cam.detach().cpu().numpy()
+    cam -= cam.min()
+    cam /= (cam.max() + 1e-8)                              # 归一化到 0..1
+    fh, fw = face.shape[:2]
+    cam = cv2.resize(cam, (fw, fh))
+    return cam, cls, conf
+
+
+def cam_map(image):
+    """可解释性分析（路线A · gradcam_analysis.py）用：暴露原始 Grad-CAM 与人脸框。
+
+    返回 dict 或 None（无图/失败）：
+      {"cam": 2D float 0..1（覆盖人脸裁剪区）, "box": (x,y,w,h)|None,
+       "face": 人脸裁剪 RGB, "emotion": 映射后标签, "raw_emotion": AffectNet 原标签,
+       "confidence": float, "cls": int}
+    """
+    if image is None:
+        return None
+    try:
+        _lazy_init()
+        rgb = _to_rgb_uint8(image)
+        box = _detect_face_box(rgb)
+        face = rgb[box[1]:box[1] + box[3], box[0]:box[0] + box[2]] if box is not None else rgb
+        cam, cls, conf = _raw_cam(face)
+        raw = _FER.idx_to_class[cls]
+        return {"cam": cam, "box": box, "face": face,
+                "emotion": AFFECTNET_TO_CONFIG.get(raw, "neutral"),
+                "raw_emotion": raw, "confidence": round(conf, 4), "cls": cls}
+    except Exception:
+        return None
+
+
 def gradcam(image):
     """对 predict 所用的同一模型做 Grad-CAM，返回热力图叠加后的 RGB 图。"""
     if image is None:
         return None
     try:
-        _lazy_init()
-        import torch
         import cv2
 
+        info = cam_map(image)
+        if info is None:
+            return image
+        cam, box, face = info["cam"], info["box"], info["face"]
         rgb = _to_rgb_uint8(image)
-        box = _detect_face_box(rgb)
-        face = rgb[box[1]:box[1] + box[3], box[0]:box[0] + box[2]] if box is not None else rgb
 
-        model = _FER.model
-        tensor = _TF(face).unsqueeze(0).to(_DEVICE)
-        tensor.requires_grad_(True)
-
-        # 在最后一层卷积后的特征图(bn2)上挂前向/反向 hook
-        store = {}
-        target = model.bn2
-        h1 = target.register_forward_hook(
-            lambda m, i, o: store.__setitem__("act", o))
-        h2 = target.register_full_backward_hook(
-            lambda m, gi, go: store.__setitem__("grad", go[0]))
-        try:
-            logits = model(tensor)                       # (1, 8)
-            cls = int(logits.argmax(dim=1).item())
-            model.zero_grad(set_to_none=True)
-            logits[0, cls].backward()
-        finally:
-            h1.remove()
-            h2.remove()
-
-        acts = store["act"][0]                            # (C, h, w)
-        grads = store["grad"][0]                          # (C, h, w)
-        weights = grads.mean(dim=(1, 2))                  # (C,) 全局平均池化梯度
-        cam = torch.relu((weights[:, None, None] * acts).sum(dim=0))  # (h, w)
-        cam = cam.detach().cpu().numpy()
-        cam -= cam.min()
-        cam /= (cam.max() + 1e-8)                          # 归一化到 0..1
-
-        fh, fw = face.shape[:2]
-        cam = cv2.resize(cam, (fw, fh))
         heat = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
         heat = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)      # JET 是 BGR，转回 RGB
         overlay_face = np.clip(0.5 * face + 0.5 * heat, 0, 255).astype(np.uint8)

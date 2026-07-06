@@ -88,8 +88,15 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 - 最终输出是**生成的音乐**，没有客观 ground truth，无法用 50 段视频定量打分。
 - 「ToM+CoT 需求推断是否比"情绪→曲风"直接查表更好」这类问题归 **user study**（12 人）或 LLM-judge 代理评测。
 
-### 5.3 GradCAM ⑦（→ 定性示例）
-- 放几张热力图聚焦在眼/嘴等面部区域的示例即可，不需要定量消融。
+### 5.3 GradCAM ⑦ —— 可解释性实验（M1，非准确率消融臂）
+GradCAM 是「解释」不是「预测」，不改变准确率，故**不作为准确率消融臂**，而是给 ⑦ 一块独立的可解释性实验（也让 M1 的贡献不止"套一个预训练脸模型"）。
+
+- **路线 A（现在做）· 脚本 [scripts/gradcam_analysis.py](../scripts/gradcam_analysis.py)**：
+  - 对每段视频取中间帧跑人脸①，产出 [原图 | Grad-CAM] 对照图，并按**预测对 / 错**分文件夹（用 labels.csv 的 ground truth）；接消融的错误分析。
+  - **聚焦度指标 focus**＝CAM 能量最高的前 20% 像素占总能量比例（∈[0,1]，越高越集中）。假设：**预测正确时注意力更集中于面部表情区**（focus_mean_correct > focus_mean_incorrect）。产物 `results/gradcam/gradcam_metrics.json`。
+  - 关键修正：Grad-CAM 目标是**情绪类别分数**（`features @ 分类器W.T`），不是特征通道——`face_emotion.cam_map()` 已按此实现，与 `predict` 的预测严格一致。
+- **路线 B（待定 · 需和 M2/M4 协调 fusion）**：把 CAM 变成**人脸可靠性信号**去调制融合——注意力跑到脸外＝该模态不可信＝下调人脸权重，新增融合臂 **E＝D+CAM 门控**，比 E vs D。**诚实预期**：RAVDESS 是干净正面表演脸，可靠性方差小，E 相对 D 增益可能微弱；如实报告，并指出在遮挡/侧脸/暗光等困难场景更有价值（接 user study / 未来工作）。
+- **另配 pre 可视化**：[scripts/viz_fatigue.py](../scripts/viz_fatigue.py) 把疲劳②用到的眼/嘴关键点画在脸上 + 标注 EAR/MAR/等级，直观展示"疲劳对应人脸哪些点"。
 
 ---
 
