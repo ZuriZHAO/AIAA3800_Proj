@@ -232,12 +232,20 @@ def cam_map(image):
         return None
 
 
+# cam_reliability 的软阈值：把「CAM 中心区集中度 raw」映射成可靠性。
+# 干净正面脸的 raw 实测约 0.69–0.88，故 raw ≥ _REL_HIGH 视为正常 → 1.0（不惩罚），
+# 只有 raw 明显偏低（注意力泄漏到裁剪边缘/背景）才 <1.0。阈值按观测分布标定，可重标。
+_REL_LOW = 0.40      # ≤ 此值 → 0（fusion 再兜 0.1 下限）
+_REL_HIGH = 0.65     # ≥ 此值 → 1.0（典型可靠人脸，不打折）
+
+
 def cam_reliability(image):
     """路线B · 人脸可靠性 ∈ [0,1]：Grad-CAM 注意力集中于人脸「中心区」的程度。
 
     人脸裁剪后，眼/鼻/嘴等表情区在中央，发际/背景/裁剪边在四角。若注意力泄漏到四角
     （裁剪不准、遮挡、非正脸），说明这一帧的人脸情绪预测不可信 → 可靠性低。
-    交给 fusion 的 weighted_cam 模式（arm E）去下调人脸权重。
+    **只惩罚异常低值**：先算中心区集中度 raw，再经软阈值 [_REL_LOW,_REL_HIGH] 映射，
+    典型可靠人脸 →1.0（不打折），仅明显跑偏 <1.0。交给 fusion 的 weighted_cam（arm E）。
     无脸 / 失败返回 0.0（= 该帧人脸不可信）。
     """
     info = cam_map(image)
@@ -251,7 +259,9 @@ def cam_reliability(image):
         ay, ax = 0.48 * h, 0.42 * w                  # 中心椭圆：覆盖内脸、排除四角
         mask = ((yy - cy) / ay) ** 2 + ((xx - cx) / ax) ** 2 <= 1.0
         total = float(cam.sum()) + 1e-8
-        return round(float(cam[mask].sum()) / total, 4)
+        raw = float(cam[mask].sum()) / total         # 中心区集中度（0..1，干净脸偏高）
+        rel = (raw - _REL_LOW) / (_REL_HIGH - _REL_LOW)   # 软阈值：只惩罚异常低
+        return round(min(1.0, max(0.0, rel)), 4)
     except Exception:
         return 0.0
 

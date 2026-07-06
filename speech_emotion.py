@@ -309,55 +309,45 @@ def _call_qwen_omni_audio(audio_path):
     fmt, audio_data_url = _audio_to_data_url(path)
 
     prompt = f"""
-    You are a multimodal speech emotion recognition system for a real-world conversational AI.
+    You are a speech emotion recognition system for a real-world conversational AI companion.
+    You will receive an audio clip of spoken dialogue. Judge the speaker's emotion.
 
-    You will receive an audio clip of spoken dialogue.
+    PRIMARY signal — vocal prosody (HOW it is said):
+    pitch, energy, rhythm, pauses, tone, speaking speed, intensity, voice stability.
 
-    You must analyze emotion using BOTH:
-
-    (1) Vocal cues:
-    - pitch
-    - energy
-    - rhythm
-    - pauses
-    - tone
-    - speaking speed
-    - intensity
-    - voice stability
-
-    (2) Semantic cues (if speech is understandable):
-    - implied meaning
-    - conversational intent
-    - emotional content of the sentence
-
-    IMPORTANT:
-    - Do NOT rely only on tone
-    - Do NOT rely only on text meaning
-    - Combine both sources
+    SECONDARY signal — spoken words (WHAT is said), used ADAPTIVELY:
+    - Use the words ONLY IF they explicitly express an emotion
+      (e.g. "I feel so sad", "this is terrifying").
+    - If the words are emotionally NEUTRAL or merely descriptive/observational
+      (e.g. "Kids are talking by the door"), do NOT let the neutral wording pull the
+      prediction toward neutral — judge from vocal prosody instead.
+    - The emotion is often carried ONLY by the voice; never assume neutral just because
+      the sentence content is ordinary.
 
     Emotion labels:
     {", ".join(EMOTION_LABELS)}
 
-    Decision rules:
-    - happy → laughter, excitement, positive tone, enthusiasm
-    - sad → low energy, slow speech, downward tone
-    - angry → high energy, sharp tone, stress, forceful speech
-    - fear → shaky voice, anxiety, uncertainty, nervousness
-    - surprise → sudden pitch change, exclamation, abrupt reaction
-    - disgust → rejection tone, aversion, negative reaction
-    - neutral → only if BOTH tone and meaning are emotionally flat
+    Decision rules (prosody-first):
+    - happy → laughter, bright/energetic tone, enthusiasm
+    - sad → low energy, slow speech, downward/heavy tone
+    - angry → high energy, sharp/harsh tone, tension, forceful speech
+    - fear → shaky/tense voice, tremor, uncertainty, nervousness
+    - surprise → sudden pitch jump, exclamation, abrupt reaction
+    - disgust → aversive/rejecting tone
+    - neutral → ONLY when the voice is prosodically flat AND the words express no emotion
 
     Confidence rules:
-    - 0.8–0.95: very clear emotion
-    - 0.5–0.8: moderate certainty
+    - 0.8–0.95: clear emotional prosody
+    - 0.5–0.8: moderate
     - 0.2–0.5: ambiguous
-    - NEVER default neutral with 0.95 unless extremely certain
+    - Do NOT output high-confidence neutral just because the sentence is an ordinary
+      statement — that is exactly when you must rely on vocal tone.
 
     Return ONLY JSON:
     {{
     "emotion": "...",
     "confidence": 0.0,
-    "reasoning": "short explanation using both audio and meaning cues"
+    "reasoning": "short explanation, citing vocal prosody first and words only if emotionally expressive"
     }}
     """
 
