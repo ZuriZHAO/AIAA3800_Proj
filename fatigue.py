@@ -19,9 +19,11 @@ EmotiCompanion · AIAA 3800 · HKUST(GZ)
       - MAR（Mouth Aspect Ratio，嘴纵横比）：打哈欠时升高；
       - PERCLOS（一段时间内闭眼帧占比）：疲劳检测的业界金标准，比单帧稳健。
     正好呼应 Lecture 2「human eye movement」——闭眼/眨眼/哈欠都是眼动线索。
-  · 关键点检测：首选 MediaPipe FaceMesh（468 点、CPU 友好、laptop-friendly，
-    与本项目"语音走 API、人脸走轻量骨干"的低门槛路线一致）。未装 MediaPipe 时
-    退化为 OpenCV Haar 眼睛级联的「睁/闭眼」粗判，零额外依赖也能出结果。
+  · 关键点检测：首选 MediaPipe FaceLandmarker（Tasks API，468+ 关键点、CPU 友好，
+    与本项目"语音走 API、人脸走轻量骨干"的低门槛路线一致）。需要模型文件
+    models/face_landmarker.task（下载说明见 requirements_full.txt）。未装 MediaPipe
+    或模型缺失时，退化为 OpenCV Haar 眼睛级联的「睁/闭眼」粗判，零额外依赖也能出结果。
+    （注：新版 mediapipe 已移除旧的 mp.solutions.face_mesh，故改用 Tasks API。）
   · 时序聚合：predict 在自动模式里每 AUTO_INTERVAL_SEC 秒被调用一次，我们在
     模块内维护一个滚动窗口（deque），用最近若干次的 PERCLOS / 哈欠频率判级，
     避免"某一帧恰好眨眼"就误报 high。experiment 里可传 use_history=False 关掉。
@@ -70,15 +72,23 @@ def _lazy_init():
     if _BACKEND is not None:
         return
 
-    # 首选 MediaPipe FaceMesh
+    # 首选 MediaPipe FaceLandmarker（Tasks API）。旧版 mp.solutions.face_mesh 已被
+    # 新版 mediapipe 移除，故改用 tasks；需要 models/face_landmarker.task 模型文件。
     try:
+        import os
         import mediapipe as mp
-        _FACE_MESH = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=True,     # 逐帧独立处理（帧之间不做跟踪）
-            max_num_faces=1,
-            refine_landmarks=False,     # 不需要虹膜细化点，468 点足够算 EAR/MAR
-            min_detection_confidence=0.5,
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision
+
+        model_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "models", "face_landmarker.task")
+        options = vision.FaceLandmarkerOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=model_path),
+            num_faces=1,                # 单人脸即可
+            running_mode=vision.RunningMode.IMAGE,   # 逐帧独立处理（帧间不跟踪）
         )
+        _FACE_MESH = vision.FaceLandmarker.create_from_options(options)
         _BACKEND = "mediapipe"
         return
     except Exception:
@@ -135,12 +145,16 @@ def _mar(pts):
 # =============================================================================
 
 def _measure_mediapipe(rgb):
-    """用 FaceMesh 关键点算平均 EAR 与 MAR。"""
+    """用 FaceLandmarker(Tasks API) 关键点算平均 EAR 与 MAR。"""
+    import mediapipe as mp
     h, w = rgb.shape[:2]
-    res = _FACE_MESH.process(rgb)               # 输入需为 RGB uint8
-    if not res.multi_face_landmarks:
+    # Tasks API 需要 mp.Image 包装（SRGB, uint8, 连续内存）
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB,
+                        data=np.ascontiguousarray(rgb))
+    res = _FACE_MESH.detect(mp_image)
+    if not res.face_landmarks:                  # 新接口是 face_landmarks（旧为 multi_face_landmarks）
         return False, 0.0, 0.0
-    lm = res.multi_face_landmarks[0].landmark   # 归一化坐标，转像素后算距离
+    lm = res.face_landmarks[0]                  # list[NormalizedLandmark]，.x/.y 归一化
 
     def px(i):
         return (lm[i].x * w, lm[i].y * h)

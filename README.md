@@ -54,12 +54,19 @@ AIAA 3800 课程项目 · HKUST(GZ) · June 2026
 ## 3. 快速开始
 
 ```bash
-# 安装框架依赖（注意 gradio 需 >= 4.39，自动模式用到 gr.skip / 流式输入 stream_every）
+# 只跑框架（mock）：安装最小依赖（gradio 需 >= 4.39，自动模式用到 gr.skip / 流式输入 stream_every）
 pip install -r requirements.txt
+
+# 跑完整系统（四人真实模块）：安装整合依赖
+pip install -r requirements_full.txt
 
 # 启动（即使各模块尚未实现，也能用 mock 数据端到端跑通）
 python app.py
 ```
+
+> **系统级前置依赖（非 pip 包）**：语音③抽音频、消融实验读视频音轨需要 **ffmpeg**。
+> 它不是 Python 包、无法写进 requirements，请单独装：`conda install -n 3800 -c conda-forge ffmpeg`。
+> **API key**：语音③(Qwen) 与 LLM⑤(DeepSeek) 需在项目根目录建 `.env`（`cp .env.example .env` 后填 key）。
 
 启动后控制台会打印每个模块的加载状态，浏览器自动打开 Gradio 页面（界面文字为英文），**默认进入自动模式**。
 
