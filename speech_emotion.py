@@ -108,6 +108,121 @@ RAW_TO_CONFIG = {
 
 
 # ============================================================
+# 本地 SER 后端（wav2vec2）—— 用于 RAVDESS 消融
+# ============================================================
+# 背景：通用 qwen-omni-flash API 读不好情绪语调（见 experiment_plan §8.6），
+# RAVDESS 消融改用专用 SER 模型：直接读韵律、给 softmax 置信度（正好喂 H2）。
+# 通过 SPEECH_BACKEND=ser 启用（默认 api，保留部署时的语义能力）。
+# ⚠️ ehcalabres 在 RAVDESS 上微调过 → 对 RAVDESS 是 in-domain，准确率是乐观上界，
+#    与人脸①（跨域）不对称，报告须如实标注（见 experiment_plan §8.6）。
+
+SER_MODEL_NAME = os.getenv(
+    "SER_MODEL", "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition")
+
+# ehcalabres 8 类 → 全队 7 类契约词表
+SER_TO_CONFIG = {
+    "angry": "angry", "calm": "neutral", "disgust": "disgust", "fearful": "fear",
+    "happy": "happy", "neutral": "neutral", "sad": "sad", "surprised": "surprise",
+}
+
+_SER_MODEL = None
+_SER_FE = None
+_SER_DEVICE = None
+
+
+def _build_ser_class():
+    """复刻 ehcalabres 的自定义分类头（stock Wav2Vec2ForSequenceClassification 的
+    projector/classifier 结构与其权重不匹配，会得到随机头）。结构：
+    encoder → 时间维 mean-pool → dense → tanh → output。"""
+    import torch
+    import torch.nn as nn
+    from transformers import Wav2Vec2Model, AutoConfig
+
+    class Wav2Vec2SER(nn.Module):
+        def __init__(self, name):
+            super().__init__()
+            self.config = AutoConfig.from_pretrained(name, local_files_only=True)
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(name, local_files_only=True)
+            h, n = self.config.hidden_size, self.config.num_labels
+            self.dense = nn.Linear(h, h)
+            self.output = nn.Linear(h, n)
+
+        def forward(self, input_values, attention_mask=None):
+            hs = self.wav2vec2(input_values, attention_mask=attention_mask).last_hidden_state
+            x = torch.tanh(self.dense(hs.mean(dim=1)))
+            return self.output(x)
+
+    return Wav2Vec2SER
+
+
+def _lazy_ser():
+    """首次调用时构建 SER 模型并从本地缓存载入真实分类头权重（懒加载单例）。"""
+    global _SER_MODEL, _SER_FE, _SER_DEVICE
+    if _SER_MODEL is not None:
+        return
+    import torch
+    from transformers import AutoFeatureExtractor
+    from huggingface_hub import hf_hub_download
+
+    _SER_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    _SER_FE = AutoFeatureExtractor.from_pretrained(SER_MODEL_NAME, local_files_only=True)
+
+    model = _build_ser_class()(SER_MODEL_NAME)
+
+    # 从缓存 checkpoint 载入自定义头（classifier.dense.* / classifier.output.*）
+    try:
+        wf = hf_hub_download(SER_MODEL_NAME, "model.safetensors", local_files_only=True)
+        from safetensors.torch import load_file
+        sd = load_file(wf)
+    except Exception:
+        wf = hf_hub_download(SER_MODEL_NAME, "pytorch_model.bin", local_files_only=True)
+        sd = torch.load(wf, map_location="cpu", weights_only=True)
+    model.dense.weight.data = sd["classifier.dense.weight"]
+    model.dense.bias.data = sd["classifier.dense.bias"]
+    model.output.weight.data = sd["classifier.output.weight"]
+    model.output.bias.data = sd["classifier.output.bias"]
+
+    _SER_MODEL = model.to(_SER_DEVICE).eval()
+
+
+def _read_wav_16k(path):
+    """读 wav → 单声道 float32 @16kHz（wav2vec2 要求 16k）。"""
+    import numpy as np
+    import soundfile as sf
+    data, sr = sf.read(path)
+    if getattr(data, "ndim", 1) > 1:
+        data = data.mean(axis=1)
+    data = np.asarray(data, dtype="float32")
+    if sr != 16000 and data.size:
+        import scipy.signal as sps
+        data = sps.resample(data, int(len(data) * 16000 / sr)).astype("float32")
+    return data
+
+
+def _predict_ser(audio_path):
+    """本地 SER：wav2vec2 前向 → softmax → 映射进 7 类词表，带 softmax 置信度。"""
+    import torch
+    _lazy_ser()
+    wav = _read_wav_16k(audio_path)
+    if wav.size == 0:
+        return _fallback("empty audio for SER")
+    inputs = _SER_FE(wav, sampling_rate=16000, return_tensors="pt", padding=True)
+    input_values = inputs["input_values"].to(_SER_DEVICE)
+    attn = inputs.get("attention_mask")
+    attn = attn.to(_SER_DEVICE) if attn is not None else None
+    with torch.no_grad():
+        logits = _SER_MODEL(input_values, attention_mask=attn)[0]
+    probs = torch.softmax(logits, dim=-1).cpu().numpy()
+    idx = int(probs.argmax())
+    raw = _SER_MODEL.config.id2label[idx].lower()
+    return {
+        "emotion": SER_TO_CONFIG.get(raw, "neutral"),
+        "confidence": round(float(probs[idx]), 4),
+        "reasoning": f"(local SER {SER_MODEL_NAME.split('/')[-1]}) raw_label={raw}",
+    }
+
+
+# ============================================================
 # Safe fallback
 # ============================================================
 
@@ -481,6 +596,14 @@ def predict(audio_path):
     """
     if audio_path is None:
         return _fallback("no audio input")
+
+    # SPEECH_BACKEND=ser → 本地 wav2vec2（RAVDESS 消融用）；默认 api（部署保留语义）
+    backend = os.getenv("SPEECH_BACKEND", "api").strip().lower()
+    if backend in {"ser", "local", "wav2vec2"}:
+        try:
+            return _predict_ser(audio_path)
+        except Exception as exc:
+            return _fallback(f"local SER unavailable: {exc}")
 
     try:
         return _call_qwen_omni_audio(audio_path)

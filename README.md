@@ -113,10 +113,13 @@ AIAA3800_Proj/
 ├── .env.example           # 环境变量模板（复制成 .env 填 key）
 ├── requirements/          # 各成员依赖拆分 requirements_m1..m4.txt
 ├── scripts/
-│   ├── prepare_ravdess.py # 消融数据准备（下 RAVDESS → labels.csv）
-│   └── run_ablation.py    # 感知层四臂消融评测
+│   ├── prepare_ravdess.py # RAVDESS 数据准备 → labels.csv（语音 in-domain，对照）
+│   ├── prepare_cremad.py  # CREMA-D 数据准备 → labels.csv（公平跨域，主实验）
+│   ├── run_ablation.py    # 感知层五臂消融评测（A-E）
+│   ├── gradcam_analysis.py# ⑦ GradCAM 可解释性实验 + 热力图（路线A）
+│   └── viz_fatigue.py     # ② 疲劳关键点可视化（pre 素材）
 ├── docs/
-│   └── experiment_plan.md # 消融实验详细方案（报告 Experiments 章草稿）
+│   └── experiment_plan.md # 消融实验详细方案 + 踩坑记录（报告 Experiments 章草稿）
 └── models/
     └── face_landmarker.task  # MediaPipe 疲劳检测模型（3.7MB）
 ```
@@ -221,21 +224,33 @@ neutral / happy / sad / angry / fear / surprise / disgust
 
 ## 7. 消融实验
 
-**只做「感知层」定量消融**，用来证明我们自己的贡献——**融合④**：把预训练的人脸与语音融合，是否优于单模态。推理⑤/音乐⑥ 与疲劳② 归 user study / 定性评估。
+**只做「感知层」定量消融**，证明我们自己的贡献——**融合④**：把预训练的人脸与语音融合，是否优于单模态。推理⑤/音乐⑥ 与疲劳② 归 user study / 定性评估。
 
-四个实验臂：A 仅人脸 · B 仅语音 · C 朴素融合 · **D 置信度加权融合**；指标 accuracy / macro-F1 / 逐类混淆矩阵（H1 融合>单模态、H2 加权>朴素、H3 模态互补）。数据用 **RAVDESS**（自带情绪标签，音视频同源）。
+五个实验臂：A 仅人脸 · B 仅语音 · C 朴素融合 · **D 置信度加权融合** · **E 加权+GradCAM门控**（路线B）；指标 accuracy / macro-F1 / 逐类混淆矩阵（H1 融合>单模态、H2 加权>朴素、H3 模态互补、E vs D 看 CAM 是否有用）。
+
+### 语音后端与数据集（关键 · 踩坑记录见 [docs/experiment_plan.md](docs/experiment_plan.md) §8）
+
+- **语音后端**：通用 Qwen-Omni API 读不好情绪语调 → 消融改用**本地 SER**（wav2vec2），`SPEECH_BACKEND=ser` 启用。
+- **数据集选择很关键**：要让融合体现价值，两模态需**公平可比**。
+  - **RAVDESS**：语音 SER 在其上微调过 → **in-domain**，语音 0.88 碾压人脸 0.60（跨域），融合无从发挥。
+  - **CREMA-D（推荐）**：人脸(AffectNet) 与 语音(RAVDESS-SER) **都没在它上训练** → 两者都跨域、公平可比（6 类，无 surprise）→ 融合才有机会真正超过单模态。
 
 ```bash
-# 1) 准备数据（下 2-3 个演员、去 calm、均衡挑 50 段 → labels.csv）
+# 方案一 · RAVDESS（语音 in-domain，作对照）
 python scripts/prepare_ravdess.py --actors 01 02 05 --n 50 --out data/ravdess
+SPEECH_BACKEND=ser python scripts/run_ablation.py --data data/ravdess --out results/ablation --refresh
 
-# 2) 跑四臂评测（人脸/语音结果带缓存，语音 API 只算一次）
-python scripts/run_ablation.py --data data/ravdess --frames 8 --out results/ablation
-python scripts/run_ablation.py --limit 6        # 快速冒烟
-python scripts/run_ablation.py --fusion-only    # 只用缓存重算 C/D，不再调 API
+# 方案二 · CREMA-D（公平跨域，主实验）——先下载视频版数据到某目录
+python scripts/prepare_cremad.py --src <CREMA-D视频目录> --n 60 --out data/cremad
+SPEECH_BACKEND=ser python scripts/run_ablation.py --data data/cremad --out results/ablation_cremad --refresh
+#   --limit 6 快速冒烟；--fusion-only 只用缓存重算融合臂
+
+# 可解释性 + pre 可视化（⑦ 与 ② 的展示素材，同样支持 --data）
+python scripts/gradcam_analysis.py --data data/cremad
+python scripts/viz_fatigue.py --data data/cremad
 ```
 
-完整方案（假设、指标、疲劳定位、局限性）见 **[docs/experiment_plan.md](docs/experiment_plan.md)**。
+完整方案（假设、五臂、指标、疲劳定位、语音踩坑、数据集公平性、局限性）见 **[docs/experiment_plan.md](docs/experiment_plan.md)**。
 
 ---
 
