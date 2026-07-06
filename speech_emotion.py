@@ -141,8 +141,8 @@ def _build_ser_class():
     class Wav2Vec2SER(nn.Module):
         def __init__(self, name):
             super().__init__()
-            self.config = AutoConfig.from_pretrained(name, local_files_only=True)
-            self.wav2vec2 = Wav2Vec2Model.from_pretrained(name, local_files_only=True)
+            self.config = AutoConfig.from_pretrained(name)
+            self.wav2vec2 = Wav2Vec2Model.from_pretrained(name)
             h, n = self.config.hidden_size, self.config.num_labels
             self.dense = nn.Linear(h, h)
             self.output = nn.Linear(h, n)
@@ -165,17 +165,17 @@ def _lazy_ser():
     from huggingface_hub import hf_hub_download
 
     _SER_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    _SER_FE = AutoFeatureExtractor.from_pretrained(SER_MODEL_NAME, local_files_only=True)
+    _SER_FE = AutoFeatureExtractor.from_pretrained(SER_MODEL_NAME)
 
     model = _build_ser_class()(SER_MODEL_NAME)
 
     # 从缓存 checkpoint 载入自定义头（classifier.dense.* / classifier.output.*）
     try:
-        wf = hf_hub_download(SER_MODEL_NAME, "model.safetensors", local_files_only=True)
+        wf = hf_hub_download(SER_MODEL_NAME, "model.safetensors")
         from safetensors.torch import load_file
         sd = load_file(wf)
     except Exception:
-        wf = hf_hub_download(SER_MODEL_NAME, "pytorch_model.bin", local_files_only=True)
+        wf = hf_hub_download(SER_MODEL_NAME, "pytorch_model.bin")
         sd = torch.load(wf, map_location="cpu", weights_only=True)
     model.dense.weight.data = sd["classifier.dense.weight"]
     model.dense.bias.data = sd["classifier.dense.bias"]
