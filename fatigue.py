@@ -21,7 +21,7 @@ EmotiCompanion · AIAA 3800 · HKUST(GZ)
     正好呼应 Lecture 2「human eye movement」——闭眼/眨眼/哈欠都是眼动线索。
   · 关键点检测：首选 MediaPipe FaceLandmarker（Tasks API，468+ 关键点、CPU 友好，
     与本项目"语音走 API、人脸走轻量骨干"的低门槛路线一致）。需要模型文件
-    models/face_landmarker.task（下载说明见 requirements_full.txt）。未装 MediaPipe
+    models/face_landmarker.task（下载说明见 requirements.txt）。未装 MediaPipe
     或模型缺失时，退化为 OpenCV Haar 眼睛级联的「睁/闭眼」粗判，零额外依赖也能出结果。
     （注：新版 mediapipe 已移除旧的 mp.solutions.face_mesh，故改用 Tasks API。）
   · 时序聚合：predict 在自动模式里每 AUTO_INTERVAL_SEC 秒被调用一次，我们在

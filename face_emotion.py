@@ -19,7 +19,7 @@ EmotiCompanion · AIAA 3800 · HKUST(GZ)
   · 检测：用 OpenCV 自带的 Haar 正面人脸级联裁出人脸再送模型，零额外依赖；检测
     不到时退化为整帧输入，保证永不崩。
 
-兼容性说明（teammate 复现要点，已在 requirements_m1.txt 钉死）
+兼容性说明（teammate 复现要点，已在 requirements/requirements_m1.txt 钉死）
   · HSEmotion 权重是「整模型 pickle」，torch≥2.6 默认 weights_only=True 会拒绝加载，
     故在加载那一刻临时设 weights_only=False（权重来自 HSEmotion 官方仓库，可信）。
   · 该 pickle 用 timm 0.9.x 序列化：timm 太新(1.0+)会在 forward 报 conv_s2d 缺失，

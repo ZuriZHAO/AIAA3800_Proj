@@ -9,7 +9,7 @@ config.py —— EmotiCompanion 全局配置与常量
 """
 
 # 全队统一的情绪「契约词表」—— Ekman 标准 7 类基本情绪。
-# 人脸(①HSEmotion/AffectNet-8) 与 语音(③EmotionThinker) 的原生输出都映射进这一套，
+# 人脸(①HSEmotion/AffectNet-8) 与 语音(③Qwen-Omni) 的原生输出都映射进这一套，
 # 这样融合层 ④ 的按情绪投票才能跨模态互相印证。各感知模块负责把自己的原生标签
 # 映射到这里（人脸映射见 face_emotion.py，语音映射由 M2 在 speech_emotion.py 实现）。
 # 注意：疲劳/困倦是独立的一维，见下面 FATIGUE_LEVELS，不要混进情绪词表。

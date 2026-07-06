@@ -1,7 +1,43 @@
-# EmotiCompanion —— 框架与集成层依赖
-# 各成员的真实模型依赖（deepface / transformers / audiocraft 等）
-# 请各自加到自己的模块说明里，这里只列运行框架本身所需的最小依赖。
+# EmotiCompanion 完整依赖清单 —— 一次装齐框架 + 四个模块
+# 在 3800 环境（python=3.10）里：
+#   pip install -r requirements.txt
+#
+# 只想跑 mock 空壳（不装各模型、看 UI 与 pipeline 流转）？只需：
+#   pip install gradio numpy
+# 缺依赖的模块 app.py 会自动回退到 mock，不影响启动。
+#
+# ⚠️ 两个不能靠本文件装好 / 需特别处理的依赖：
+#   1) torch / torchaudio：按你的 CUDA 版本从 https://pytorch.org 单独装（本机有 GPU，
+#      不要让本文件把它覆盖成 CPU 版），所以这里刻意不列 torch。
+#   2) ffmpeg：系统级程序不是 pip 包，audio_extract.py 抽音频要用。用 conda 装：
+#         conda install -n 3800 -c conda-forge ffmpeg
+#
+# 各模块依赖的详细拆分见 requirements/ 目录下的 requirements_m1..m4.txt。
 
-# Gradio：gr.Timer / gr.skip() / 流式输入需要 4.39+
+# ---- 框架 (app.py) ----
 gradio>=4.39
-numpy>=1.24
+numpy
+
+# ---- M1 · 人脸情绪① + GradCAM⑦ ----
+# ⚠️ timm 必须 0.9.16：hsemotion 权重是 timm 0.9.x 序列化的整模型 pickle
+timm==0.9.16
+hsemotion
+opencv-python
+
+# ---- M2 · 语音情绪③（Qwen-Omni via OpenAI 兼容 API）----
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# ---- M3 · LLM 推理⑤（DeepSeek/OpenAI）+ 音乐生成⑥（MusicGen）----
+transformers>=4.31.0
+accelerate
+scipy
+soundfile
+
+# ---- M4 · 疲劳检测② ----
+# fatigue.py 用 mediapipe 的 Tasks API（FaceLandmarker），需要模型文件：
+#     models/face_landmarker.task
+# 下载（约 3.7MB，放到项目根的 models/ 下）：
+#   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+# 模型缺失或 mediapipe 未装时，fatigue.py 自动退回 OpenCV Haar 粗判，不阻塞。
+mediapipe

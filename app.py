@@ -264,7 +264,7 @@ def build_ui():
         outputs = [heatmap_out, perception_out, fusion_out, reasoning_out, music_out]
 
         # ---------------- 自动模式的数据流 ----------------
-        # 关键（本项目踩过的坑，见 代码说明.md，勿改回）：
+        # 关键（本项目踩过的坑，见 README.md §6.0，勿改回）：
         #   摄像头 stream 必须「直接驱动」pipeline，绝不能用 gr.Timer 去读中转 State。
         #   早期用 Timer 读 last_frame(State) 时，Timer 在独立事件里读回的是 None，
         #   auto_step 一直走「image is None → 全 skip」分支，输出区永远不刷新
