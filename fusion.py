@@ -167,28 +167,40 @@ def fuse_naive(face, speech, fatigue=None) -> Dict:
     )
 
 
-def fuse_weighted(face, speech, fatigue=None) -> Dict:
+def fuse_weighted(face, speech, fatigue=None, use_reliability=False) -> Dict:
     """
-    Weighted fusion arm D: confidence-weighted voting.
+    Weighted fusion: confidence-weighted voting.
 
     Score(emotion) = sum(static_modality_weight * modality_confidence)
     The modality weights are normalized over active modalities. Fatigue is not used
     for emotion voting; it is passed through as an independent arousal/energy signal.
+
+    use_reliability=False -> arm D（原样）。
+    use_reliability=True  -> arm E（路线B · CAM 门控）：把人脸权重乘以 GradCAM 派生的
+      人脸可靠性 face["reliability"]∈[0,1]（缺省 1.0=不门控）。注意力跑到脸外→可靠性低
+      →人脸权重被压低、语音占比升高。可靠性怎么算见 face_emotion.cam_reliability()。
     """
     face_emo, face_conf, speech_emo, speech_conf, fatigue_level, fatigue_conf = _read_inputs(
         face, speech, fatigue
     )
 
+    mode_str = "weighted_cam" if use_reliability else "weighted"
+
+    # 人脸可靠性：只在 arm E 生效；设 0.1 下限，避免 r=0 且语音缺失时 weight_sum 为 0。
+    r_face = 1.0
+    if use_reliability:
+        r_face = max(0.1, _clamp01(face.get("reliability", 1.0)))
+
     active = []
     if face_conf > 0.0:
-        active.append(("face", face_emo, FACE_WEIGHT, face_conf))
+        active.append(("face", face_emo, FACE_WEIGHT * r_face, face_conf))
     if speech_conf > 0.0:
         active.append(("speech", speech_emo, SPEECH_WEIGHT, speech_conf))
 
     if not active:
         return _result(
             MOCK_EMOTION, 0.0, fatigue_level, face_conf, speech_conf, fatigue_conf,
-            "weighted", face_emo, speech_emo
+            mode_str, face_emo, speech_emo
         )
 
     # Normalize weights over available modalities, so if one modality is missing,
@@ -215,7 +227,7 @@ def fuse_weighted(face, speech, fatigue=None) -> Dict:
 
     return _result(
         dominant, fusion_conf, fatigue_level, face_conf, speech_conf, fatigue_conf,
-        "weighted", face_emo, speech_emo
+        mode_str, face_emo, speech_emo
     )
 
 
@@ -236,8 +248,10 @@ def fuse(face, speech, fatigue=None, mode: Optional[str] = None) -> Dict:
     if mode in {"naive", "simple", "vote", "voting", "equal"}:
         return fuse_naive(face, speech, fatigue)
     if mode in {"weighted", "confidence", "confidence_weighted", "cw"}:
-        return fuse_weighted(face, speech, fatigue)
-    raise ValueError(f"Unknown fusion mode: {mode}. Use 'naive' or 'weighted'.")
+        return fuse_weighted(face, speech, fatigue, use_reliability=False)
+    if mode in {"weighted_cam", "cam", "cam_gated", "e"}:
+        return fuse_weighted(face, speech, fatigue, use_reliability=True)
+    raise ValueError(f"Unknown fusion mode: {mode}. Use 'naive' / 'weighted' / 'weighted_cam'.")
 
 
 if __name__ == "__main__":

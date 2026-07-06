@@ -232,6 +232,30 @@ def cam_map(image):
         return None
 
 
+def cam_reliability(image):
+    """路线B · 人脸可靠性 ∈ [0,1]：Grad-CAM 注意力集中于人脸「中心区」的程度。
+
+    人脸裁剪后，眼/鼻/嘴等表情区在中央，发际/背景/裁剪边在四角。若注意力泄漏到四角
+    （裁剪不准、遮挡、非正脸），说明这一帧的人脸情绪预测不可信 → 可靠性低。
+    交给 fusion 的 weighted_cam 模式（arm E）去下调人脸权重。
+    无脸 / 失败返回 0.0（= 该帧人脸不可信）。
+    """
+    info = cam_map(image)
+    if info is None or info.get("cam") is None or info.get("box") is None:
+        return 0.0
+    try:
+        cam = info["cam"]
+        h, w = cam.shape
+        yy, xx = np.ogrid[:h, :w]
+        cy, cx = h / 2.0, w / 2.0
+        ay, ax = 0.48 * h, 0.42 * w                  # 中心椭圆：覆盖内脸、排除四角
+        mask = ((yy - cy) / ay) ** 2 + ((xx - cx) / ax) ** 2 <= 1.0
+        total = float(cam.sum()) + 1e-8
+        return round(float(cam[mask].sum()) / total, 4)
+    except Exception:
+        return 0.0
+
+
 def gradcam(image):
     """对 predict 所用的同一模型做 Grad-CAM，返回热力图叠加后的 RGB 图。"""
     if image is None:

@@ -85,14 +85,19 @@ def _sample_frame_indices(total, k):
 
 
 def _face_predict_video(face_mod, video_path, k):
-    """抽 k 帧跑人脸情绪，按置信度加权投票聚合成一个 {emotion, confidence}。"""
+    """抽 k 帧跑人脸情绪，按置信度加权投票聚合成一个 {emotion, confidence, reliability}。
+
+    reliability = 各帧 GradCAM 人脸可靠性的均值（路线B · arm E 用），无 cam_reliability
+    实现时退回 1.0（=不门控，等价于 arm D）。
+    """
     import cv2
 
+    has_rel = hasattr(face_mod, "cam_reliability")
     cap = cv2.VideoCapture(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     idxs = _sample_frame_indices(total, k)
 
-    votes, conf_sum, n_used = {}, 0.0, 0
+    votes, conf_sum, n_used, rels = {}, 0.0, 0, []
     for idx in idxs:
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ok, frame_bgr = cap.read()
@@ -105,13 +110,18 @@ def _face_predict_video(face_mod, video_path, k):
         votes[emo] = votes.get(emo, 0.0) + c
         conf_sum += c
         n_used += 1
+        if has_rel:
+            rels.append(float(face_mod.cam_reliability(rgb)))   # 含无脸帧的 0，会拉低均值
     cap.release()
 
+    reliability = round(sum(rels) / len(rels), 4) if rels else 1.0
     if not votes or conf_sum <= 0.0:
-        return {"emotion": "neutral", "confidence": 0.0, "frames_used": n_used}
+        return {"emotion": "neutral", "confidence": 0.0,
+                "reliability": reliability, "frames_used": n_used}
     emotion = max(votes, key=votes.get)
     confidence = round(votes[emotion] / conf_sum, 4)   # 主导情绪占总置信度的比例
-    return {"emotion": emotion, "confidence": confidence, "frames_used": n_used}
+    return {"emotion": emotion, "confidence": confidence,
+            "reliability": reliability, "frames_used": n_used}
 
 
 # =============================================================================
@@ -151,14 +161,18 @@ def _save_cache(cache_path, cache):
 # =============================================================================
 
 def _arm_predictions(fusion_mod, face, speech):
-    """返回 {"A": emo, "B": emo, "C": emo, "D": emo}。融合层不用疲劳，传 None。"""
+    """返回 {"A"..."E": emo}。融合层不用疲劳，传 None。
+    E = 置信度加权 + GradCAM 人脸可靠性门控（路线B），读 face["reliability"]。
+    """
     c = fusion_mod.fuse(face, speech, None, mode="naive")
     d = fusion_mod.fuse(face, speech, None, mode="weighted")
+    e = fusion_mod.fuse(face, speech, None, mode="weighted_cam")
     return {
         "A": face.get("emotion", "neutral"),
         "B": speech.get("emotion", "neutral"),
         "C": c.get("dominant_emotion", "neutral"),
         "D": d.get("dominant_emotion", "neutral"),
+        "E": e.get("dominant_emotion", "neutral"),
     }
 
 
@@ -265,7 +279,7 @@ def main():
         mods = _load_real_modules()
 
     y_true = []
-    preds = {"A": [], "B": [], "C": [], "D": []}
+    preds = {"A": [], "B": [], "C": [], "D": [], "E": []}
 
     for i, row in enumerate(rows, 1):
         rel_path, gt = row["path"], row["emotion"]
@@ -300,16 +314,17 @@ def main():
         "B": "B. speech only",
         "C": "C. naive fusion",
         "D": "D. weighted fusion",
+        "E": "E. weighted + CAM-gate",
     }
     all_metrics = {}
     print("\n" + "=" * 60)
     print(f"Ablation results on {len(y_true)} samples")
     print("=" * 60)
-    print(f"{'arm':<22}{'accuracy':>10}{'macro-F1':>10}")
-    for arm in ("A", "B", "C", "D"):
+    print(f"{'arm':<24}{'accuracy':>10}{'macro-F1':>10}")
+    for arm in ("A", "B", "C", "D", "E"):
         m = _metrics(y_true, preds[arm], EMOTION_LABELS)
         all_metrics[arm] = {"name": arm_names[arm], **m}
-        print(f"{arm_names[arm]:<22}{m['accuracy']:>10.4f}{m['macro_f1']:>10.4f}")
+        print(f"{arm_names[arm]:<24}{m['accuracy']:>10.4f}{m['macro_f1']:>10.4f}")
         _save_confusion_csv(
             os.path.join(args.out, f"confusion_{arm}.csv"), m["confusion"], EMOTION_LABELS)
 
@@ -324,9 +339,10 @@ def main():
 
     print("\n已保存：")
     print(f"  指标      -> {metrics_path}")
-    print(f"  混淆矩阵  -> {os.path.join(args.out, 'confusion_[A-D].csv')}")
+    print(f"  混淆矩阵  -> {os.path.join(args.out, 'confusion_[A-E].csv')}")
     print(f"  感知缓存  -> {cache_path}")
-    print("\n结论对照 experiment_plan：H1 看 D/C vs A/B，H2 看 D vs C，H3 看 A/B 混淆矩阵互补。")
+    print("\n结论对照 experiment_plan：H1 看 D/C vs A/B，H2 看 D vs C，"
+          "H3 看 A/B 混淆矩阵互补，路线B 看 E vs D（CAM 门控是否有用）。")
 
 
 if __name__ == "__main__":
