@@ -1,2 +1,10 @@
 openai>=1.0.0
 python-dotenv>=1.0.0
+
+# ---- 本地音频情绪模型（可选，仅当 SPEECH_BACKEND=emotion2vec 时需要）----
+# emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation
+# 官方通过 FunASR AutoModel 运行 iic/emotion2vec_plus_* 检查点。
+# funasr>=1.1.0
+# modelscope>=1.9.0
+# torch
+# torchaudio

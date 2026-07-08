@@ -21,8 +21,20 @@ Optional:
     SPEECH_MAX_AUDIO_BYTES=8388608
     TEST_AUDIO_PATH=test.wav
 
+Local backends (RAVDESS 消融用，通过 SPEECH_BACKEND 切换)：
+    SPEECH_BACKEND=api          默认，走 Qwen-Omni API（保留语义能力）
+    SPEECH_BACKEND=ser          本地 wav2vec2 (ehcalabres, in-domain 微调)
+    SPEECH_BACKEND=emotion2vec  本地 emotion2vec+ (自监督预训练, 跨域)
+        emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation
+        默认 iic/emotion2vec_plus_base（笔记本友好）；plus_large 精度更高但 1.95G，
+        低内存机器会 OOM。改 EMO2VEC_MODEL 切换。
+        依赖：pip install funasr modelscope torch torchaudio
+        首次运行会自动从 ModelScope 下载权重到本地缓存。
+
 Install dependencies:
     pip install openai python-dotenv
+    # 本地 emotion2vec 后端额外需要：
+    pip install funasr modelscope torch torchaudio
 """
 
 import base64
@@ -219,6 +231,114 @@ def _predict_ser(audio_path):
         "emotion": SER_TO_CONFIG.get(raw, "neutral"),
         "confidence": round(float(probs[idx]), 4),
         "reasoning": f"(local SER {SER_MODEL_NAME.split('/')[-1]}) raw_label={raw}",
+    }
+
+
+# ============================================================
+# 本地 SER 后端（emotion2vec）—— 自监督语音情绪表征
+# ============================================================
+# emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation
+#   (Ma et al., 2023, https://arxiv.org/abs/2312.15185)
+# 用官方 FunASR AutoModel 跑 iic/emotion2vec_plus_* 检查点。emotion2vec+ 系列在
+# 大规模情绪语音上自监督预训练 + 有监督微调，直接给 utterance 级 9 类概率。
+# 与 wav2vec2(ehcalabres) 的区别、意义（对 RAVDESS 是跨域预训练模型，非 in-domain
+# 微调，故准确率不是乐观上界，与人脸①的跨域性质更对称）——见 experiment_plan §8.6。
+# 通过 SPEECH_BACKEND=emotion2vec 启用。默认模型 iic/emotion2vec_plus_base
+# （笔记本友好；iic/emotion2vec_plus_large 精度更高但权重 1.95G，低内存机器会 OOM，
+#  实测 <5G 空闲内存跑 large 会 alloc 失败，改 EMO2VEC_MODEL 切换）。
+
+EMO2VEC_MODEL_NAME = os.getenv("EMO2VEC_MODEL", "iic/emotion2vec_plus_base")
+
+# emotion2vec+ 原生 9 类（中文/English 双语标签，取 "/" 后的英文）→ 全队 7 类契约词表。
+# other / unknown 不属于 7 类情绪：默认从 argmax 中排除（见下 EMO2VEC_EXCLUDE_OTHER），
+# 若未排除而仍胜出，则回退 neutral。
+EMO2VEC_TO_CONFIG = {
+    "angry": "angry",
+    "disgusted": "disgust",
+    "fearful": "fear",
+    "happy": "happy",
+    "neutral": "neutral",
+    "sad": "sad",
+    "surprised": "surprise",
+    "other": "neutral",
+    "unknown": "neutral",
+}
+
+# 默认从 argmax 中剔除 other/unknown，使 emotion2vec 作为干净的 7 类 SER 参与消融。
+# 设 EMO2VEC_EXCLUDE_OTHER=0 可保留原生 9 类 argmax（other/unknown 胜出时回退 neutral）。
+EMO2VEC_EXCLUDE_OTHER = os.getenv("EMO2VEC_EXCLUDE_OTHER", "1").strip().lower() not in {
+    "0", "false", "no", ""
+}
+
+_EMO2VEC_MODEL = None
+
+
+def _emo2vec_label_en(raw):
+    """FunASR 返回的标签形如 '生气/angry' 或 '<unk>'，取英文小写；<unk> → unknown。"""
+    raw = str(raw or "").strip()
+    if "/" in raw:
+        raw = raw.split("/")[-1]
+    raw = raw.strip().lower()
+    if raw in {"<unk>", "unk", ""}:
+        return "unknown"
+    return raw
+
+
+def _lazy_emotion2vec():
+    """首次调用时用 FunASR AutoModel 载入 emotion2vec+ 检查点（懒加载单例）。
+
+    首次会自动从 ModelScope 下载权重到本地缓存；离线环境请预先 modelscope download。
+    """
+    global _EMO2VEC_MODEL
+    if _EMO2VEC_MODEL is not None:
+        return
+    from funasr import AutoModel
+
+    # disable_update=True 关掉 FunASR 每次启动的联网版本检查（离线/内网更稳）
+    _EMO2VEC_MODEL = AutoModel(model=EMO2VEC_MODEL_NAME, disable_update=True)
+
+
+def _predict_emotion2vec(audio_path):
+    """本地 emotion2vec+：FunASR 前向 → utterance 级 9 类概率 → 映射进 7 类词表。
+
+    AutoModel.generate 返回 [{"labels": [...9...], "scores": [...9...], ...}]，
+    labels 为双语字符串，scores 为对应概率。granularity='utterance' 给整段一个向量，
+    extract_embedding=False 只要分类头概率（不额外返回 768 维表征，省内存）。
+    """
+    _lazy_emotion2vec()
+    rec = _EMO2VEC_MODEL.generate(
+        audio_path,
+        granularity="utterance",
+        extract_embedding=False,
+    )
+    if not rec:
+        return _fallback("emotion2vec returned no result")
+
+    item = rec[0]
+    labels = item.get("labels") or []
+    scores = item.get("scores") or []
+    if not labels or not scores or len(labels) != len(scores):
+        return _fallback(f"emotion2vec malformed output: {item!r}")
+
+    # (英文标签, 概率) 序列
+    pairs = [(_emo2vec_label_en(l), float(s)) for l, s in zip(labels, scores)]
+
+    # 默认剔除 other/unknown，作为干净 7 类 SER；剔完为空则回退全量
+    cand = pairs
+    if EMO2VEC_EXCLUDE_OTHER:
+        filtered = [(en, s) for en, s in pairs if en not in {"other", "unknown"}]
+        if filtered:
+            cand = filtered
+
+    raw_en, prob = max(cand, key=lambda t: t[1])
+    return {
+        "emotion": EMO2VEC_TO_CONFIG.get(raw_en, "neutral"),
+        "confidence": round(prob, 4),
+        "reasoning": (
+            f"(local emotion2vec {EMO2VEC_MODEL_NAME.split('/')[-1]}) "
+            f"raw_label={raw_en}"
+            + ("" if not EMO2VEC_EXCLUDE_OTHER else " (other/unknown excluded)")
+        ),
     }
 
 
@@ -597,8 +717,15 @@ def predict(audio_path):
     if audio_path is None:
         return _fallback("no audio input")
 
-    # SPEECH_BACKEND=ser → 本地 wav2vec2（RAVDESS 消融用）；默认 api（部署保留语义）
+    # 本地后端（RAVDESS 消融用），默认 api（部署保留语义能力）：
+    #   SPEECH_BACKEND=ser          → wav2vec2（ehcalabres，in-domain 微调）
+    #   SPEECH_BACKEND=emotion2vec  → emotion2vec+（自监督预训练，跨域）
     backend = os.getenv("SPEECH_BACKEND", "api").strip().lower()
+    if backend in {"emotion2vec", "emo2vec", "e2v"}:
+        try:
+            return _predict_emotion2vec(audio_path)
+        except Exception as exc:
+            return _fallback(f"local emotion2vec unavailable: {exc}")
     if backend in {"ser", "local", "wav2vec2"}:
         try:
             return _predict_ser(audio_path)

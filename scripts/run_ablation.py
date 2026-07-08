@@ -39,6 +39,27 @@ import json
 import os
 import sys
 
+# -----------------------------------------------------------------------------
+# Windows 上 torch / numba(funasr) / torchvision / transformers(TF) 各带一份
+# OpenMP 运行时(libiomp5md.dll)，同进程一起加载会冲突 → emotion2vec + 人脸 Grad-CAM
+# 一起跑时段错误 0xC0000005。KMP_DUPLICATE_LIB_OK 必须在 python 进程启动前就在环境里
+# (脚本里再设已太晚：解释器启动阶段就可能加载了 OpenMP DLL)。所以这里「设好环境变量后
+# 用 subprocess 重启一个带正确环境的子进程并把它的退出码透传」——等价于在 shell 里先设
+# 变量再跑，用户因此可直接 `python scripts/run_ablation.py ...` 而无需手动设任何变量。
+# (用 subprocess 而非 os.execv：Windows 上 execv 会甩掉 stdout 重定向与退出码。)
+# -----------------------------------------------------------------------------
+if os.environ.get("_ABLATION_REEXEC") != "1":
+    _env = dict(os.environ)
+    _env["KMP_DUPLICATE_LIB_OK"] = "TRUE"   # 放行重复 OpenMP，防段错误
+    _env["OMP_NUM_THREADS"] = "1"
+    _env["MKL_NUM_THREADS"] = "1"
+    _env["USE_TF"] = "0"                     # 禁 transformers 的 TF 后端(ser 用)，避崩省内存
+    _env["USE_TORCH"] = "1"
+    _env.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    _env["_ABLATION_REEXEC"] = "1"           # 防重启死循环
+    import subprocess
+    sys.exit(subprocess.run([sys.executable] + sys.argv, env=_env).returncode)
+
 # 让脚本无论从项目根还是 scripts/ 下运行，都能 import 到根目录的成员模块
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
