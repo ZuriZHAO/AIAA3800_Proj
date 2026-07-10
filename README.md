@@ -13,7 +13,7 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 
 1. **感知 Perception**：多模态自动感知用户情绪，无需手动告诉系统你的心情
    - 人脸表情情绪（HSEmotion / AffectNet）
-   - 语音情绪（Qwen-Omni，经 API）
+   - 语音情绪（emotion2vec+ 本地，默认；可切 Qwen-Omni API）
    - 疲劳状态（面部关键点 EAR/MAR/PERCLOS）
 2. **推理 Reasoning**：知道情绪还不够，要推断需求。用 LLM + Theory-of-Mind 提示 + CoT 推理，从「情绪+疲劳」推断「心理需求」（例如：焦虑且疲惫 → 低唤醒舒缓；焦虑但清醒 → 稳定接地）
 3. **生成 Generation**：根据推理出的音乐描述词，用 MusicGen 生成专属音频片段
@@ -41,7 +41,7 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 | ① | 人脸情绪 | `face_emotion.py` | HSEmotion (EfficientNet-B0, AffectNet-8) | M1 |
 | ⑦ | GradCAM 可解释 | `face_emotion.py` | 对①同一模型做 Grad-CAM 热力图 | M1 |
 | ② | 疲劳检测 | `fatigue.py` | MediaPipe FaceLandmarker → EAR/MAR/PERCLOS | M4 |
-| ③ | 语音情绪 | `speech_emotion.py` | Qwen-Omni（智增增网关，OpenAI 兼容 API） | M2 |
+| ③ | 语音情绪 | `speech_emotion.py` | **emotion2vec+（默认，本地）** / Qwen-Omni API（可切，读语义） | M2 |
 | — | 音频抽取 | `audio_extract.py` | ffmpeg 从视频抽 wav（实验用） | M2 |
 | ④ | 多模态融合 | `fusion.py` | naive / weighted / weighted_cam / bayes 四模式 | M2/M4 |
 | ⑤ | LLM 需求推理 | `llm_reason.py` | ToM + 两段式 CoT，规则版 / DeepSeek-OpenAI 后端 | M3 |

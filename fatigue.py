@@ -228,6 +228,51 @@ def reset_history():
 # ② 疲劳检测 —— app.py 调用的公开接口
 # =============================================================================
 
+def visualize(image):
+    """在脸上标注 EAR/MAR 用到的眼/嘴关键点 + 数值，返回标注后的 RGB 图。
+
+    供 app.py 在 user study 时保存「疲劳可视化」（直观展示疲劳看的是人脸哪些点）。
+    与 predict 用同一套 MediaPipe 关键点；无 mediapipe / 无脸 / 出错时返回原图。
+    仅用于展示，不进融合。
+    """
+    if image is None:
+        return None
+    try:
+        import cv2
+        rgb = _to_rgb_uint8(image)
+        _lazy_init()
+        if _BACKEND != "mediapipe" or _FACE_MESH is None:
+            return rgb                       # Haar 兜底拿不到精细关键点，原样返回
+        import mediapipe as mp
+        h, w = rgb.shape[:2]
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB,
+                            data=np.ascontiguousarray(rgb))
+        res = _FACE_MESH.detect(mp_image)
+        if not res.face_landmarks:
+            return rgb
+        lm = res.face_landmarks[0]
+        pt = lambda i: (int(lm[i].x * w), int(lm[i].y * h))
+        ear = 0.5 * (_ear([(lm[i].x * w, lm[i].y * h) for i in LEFT_EYE]) +
+                     _ear([(lm[i].x * w, lm[i].y * h) for i in RIGHT_EYE]))
+        mar = _mar([(lm[i].x * w, lm[i].y * h) for i in MOUTH])
+        out = rgb.copy()
+        for i in LEFT_EYE + RIGHT_EYE:                              # 眼：绿点
+            cv2.circle(out, pt(i), 2, (0, 255, 0), -1)
+        cv2.line(out, pt(MOUTH[0]), pt(MOUTH[1]), (255, 0, 255), 1)  # 上下唇（MAR 分子）
+        cv2.line(out, pt(MOUTH[2]), pt(MOUTH[3]), (255, 0, 255), 1)  # 嘴角（MAR 分母）
+        for i in MOUTH:                                             # 嘴：品红点
+            cv2.circle(out, pt(i), 2, (255, 0, 255), -1)
+        hint = "closed" if ear < EAR_CLOSED else ("drowsy" if ear < EAR_DROWSY else "open")
+        cv2.putText(out, f"EAR={ear:.2f} MAR={mar:.2f} [{hint}]", (8, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
+        return out
+    except Exception:
+        try:
+            return _to_rgb_uint8(image)
+        except Exception:
+            return None
+
+
 def predict(image, use_history=True):
     """输入 RGB 图（np.ndarray，可能为 None），输出 {"fatigue_level","confidence"}。
 

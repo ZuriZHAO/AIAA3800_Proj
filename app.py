@@ -55,6 +55,11 @@ for _v in ("no_proxy", "NO_PROXY"):
 # 允许重复加载（官方标注为 unsafe 但对本项目实测稳定，不设则常常起不来）。
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
+# 语音后端默认用 emotion2vec+ —— 跨所有测试数据集表现最好（见 docs/experiment_plan.md §4）。
+# 用 setdefault，想临时切回 API/其它后端时 `SPEECH_BACKEND=api python app.py` 仍可覆盖。
+# （需已装 funasr/modelscope/torchaudio；缺依赖时 speech_emotion 会回退，见 requirements.txt）
+os.environ.setdefault("SPEECH_BACKEND", "emotion2vec")
+
 import numpy as np
 import gradio as gr
 
@@ -105,10 +110,72 @@ def _perceive_and_fuse(image, audio):
     return perception, heatmap, state
 
 
-def _reason_and_compose(state):
-    """跑 ⑤ LLM 推理 + ⑥ 音乐生成，返回 (reasoning_text, music)。"""
-    need = LLM.infer(state)             # ⑤ ToM + CoT 推理 (M3)
+# 会话日志：每次生成音乐时把「系统输出」追加进一个 JSONL，供 user study 事后对齐。
+# 只存标签/文本（情绪/疲劳/需求/music_spec）+ 会话标签，**不含**人脸图像或录音。
+# 路径默认 results/session_log.jsonl（results/ 已 gitignore）；可用 STUDY_LOG 覆盖。
+# 用「会话标签」区分数据：实验时填参与者编号(P01…)，平时测试保持 test/自己的名字。
+SESSION_LOG_PATH = os.getenv("STUDY_LOG", os.path.join("results", "session_log.jsonl"))
+
+
+def _log_session(state, need, session_label):
+    """把一次生成的系统输出追加进会话日志（失败静默，绝不影响主流程）。"""
+    try:
+        os.makedirs(os.path.dirname(SESSION_LOG_PATH) or ".", exist_ok=True)
+        rec = {
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "label": (str(session_label).strip() or "test") if session_label else "test",
+            "sys_emotion": state.get("dominant_emotion"),
+            "sys_fatigue": state.get("fatigue"),
+            "sys_need": need.get("need"),
+            "sys_music_spec": need.get("music_spec"),
+        }
+        with open(SESSION_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:  # 日志不是核心功能，出错只提示不中断
+        print(f"[study-log] skip ({e})")
+
+
+# 可视化留存：user study 时保存 GradCAM 热力图(⑦) + 疲劳关键点可视化(②) 到 <media>/<label>/。
+# ⚠️ 这两张都是**人脸衍生图**（含被试面容），与「不保存人脸」相冲突，故**默认关闭**；
+#    只有显式 STUDY_SAVE_MEDIA=1 且**已取得被试知情同意**时才开启（见 docs/user_study.md 附录 A）。
+STUDY_SAVE_MEDIA = os.getenv("STUDY_SAVE_MEDIA", "0").strip().lower() in {"1", "true", "yes", "on"}
+SESSION_MEDIA_DIR = os.getenv("STUDY_MEDIA_DIR", os.path.join("results", "session_media"))
+
+
+def _save_media(image, heatmap, session_label):
+    """保存本次的 GradCAM 热力图 + 疲劳可视化（默认关闭；失败静默）。"""
+    if not STUDY_SAVE_MEDIA or image is None:
+        return
+    try:
+        import cv2
+        label = (str(session_label).strip() or "test") if session_label else "test"
+        d = os.path.join(SESSION_MEDIA_DIR, label)
+        os.makedirs(d, exist_ok=True)
+        ts = time.strftime("%H%M%S")
+        if heatmap is not None:                      # ⑦ GradCAM（RGB → BGR 存盘）
+            cv2.imwrite(os.path.join(d, f"gradcam_{ts}.png"),
+                        cv2.cvtColor(np.asarray(heatmap), cv2.COLOR_RGB2BGR))
+        fviz = FATIGUE.visualize(image) if hasattr(FATIGUE, "visualize") else None
+        if fviz is not None:                         # ② 疲劳关键点可视化
+            cv2.imwrite(os.path.join(d, f"fatigue_{ts}.png"),
+                        cv2.cvtColor(np.asarray(fviz), cv2.COLOR_RGB2BGR))
+    except Exception as e:
+        print(f"[study-media] skip ({e})")
+
+
+def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot"):
+    """跑 ⑤ LLM 推理 + ⑥ 音乐生成，返回 (reasoning_text, music)。同时写会话日志。
+
+    reasoning_mode：'tom_cot'（默认，ToM+CoT 两段式）或 'standard'（情绪→曲风直接查表基线）。
+    供 user study 的 Q3 对比用——主试切到 standard 再跑一次即可，无需旁边写代码。
+    """
+    mode = "standard" if str(reasoning_mode).lower().startswith(("standard", "base")) else "tom_cot"
+    if hasattr(LLM, "infer_with_mode"):
+        need = LLM.infer_with_mode(state, mode)   # ⑤ (M3) 支持模式切换
+    else:
+        need = LLM.infer(state)                   # mock 或旧接口：回退默认
     music = MUSIC.generate(need["music_spec"])  # ⑥ MusicGen (M3)
+    _log_session(state, need, session_label)    # 记录系统输出（user study 用）
     reasoning_text = (
         f"[Need] {need['need']}\n\n"
         f"[Reasoning (CoT)]\n{need['reasoning']}\n\n"
@@ -125,9 +192,10 @@ def _dump(obj):
 # 手动模式 —— 单次运行完整 pipeline（总是重新生成音乐）
 # =============================================================================
 
-def run_manual(image, audio):
+def run_manual(image, audio, session_label=None, reasoning_mode="tom_cot"):
     perception, heatmap, state = _perceive_and_fuse(image, audio)
-    reasoning_text, music = _reason_and_compose(state)
+    reasoning_text, music = _reason_and_compose(state, session_label, reasoning_mode)
+    _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
     # 同时把本次 state_key 写回 last_key，避免切到自动模式时重复生成
     return (heatmap, _dump(perception), _dump(state),
             reasoning_text, music, _state_key(state))
@@ -139,7 +207,7 @@ def run_manual(image, audio):
 #   不论是否变化，都刷新一个时间戳「心跳」，让你一眼看出 pipeline 在跑
 # =============================================================================
 
-def auto_step(image, audio_buffer, last_key):
+def auto_step(image, audio_buffer, last_key, session_label=None, reasoning_mode="tom_cot"):
     """摄像头流式回调：拿当前帧 + 最近一段录音，感知融合，按需更换音乐。
 
     输出顺序对齐 UI：
@@ -163,7 +231,8 @@ def auto_step(image, audio_buffer, last_key):
                 note, gr.skip(), last_key, [])
 
     # 状态变化 → 重新推理并生成新音乐
-    reasoning_text, music = _reason_and_compose(state)
+    reasoning_text, music = _reason_and_compose(state, session_label, reasoning_mode)
+    _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
     reasoning_text = f"[{ts}] state CHANGED → regenerated music.\n\n" + reasoning_text
     return (heatmap, _dump(perception), _dump(state),
             reasoning_text, music, key, [])
@@ -230,6 +299,23 @@ def build_ui():
                  f"music stays on until you close the page. Manual: snapshot/upload then run once.",
         )
 
+        # 会话标签：区分「实验数据」与「平时测试数据」。实验时填参与者编号(如 P03)，
+        # 平时保持 test。写进 results/session_log.jsonl 的 label 列，事后按此筛选。
+        session_label = gr.Textbox(
+            label="🧪 Session label / 会话标签",
+            value="test",
+            info="实验时填参与者编号（如 P03）；平时测试保持 test。用于区分会话日志里的数据。",
+        )
+
+        # 推理模式：默认 ToM+CoT（部署走这个）；切 Standard 得到「情绪→曲风」直接查表基线。
+        # user study Q3 对比用：主试切到 Standard、用同一输入再点一次即可，无需旁边写代码。
+        reasoning_mode = gr.Radio(
+            ["ToM+CoT (default)", "Standard (baseline)"],
+            value="ToM+CoT (default)",
+            label="⑤ Reasoning mode",
+            info="对比用：默认 ToM+CoT 两段式推理；切 Standard 看直接查表基线（user study Q3）。",
+        )
+
         # ---------------- 自动模式区 ----------------
         with gr.Group(visible=True) as auto_group:
             with gr.Row():
@@ -285,7 +371,7 @@ def build_ui():
         # 并带上累积的 audio_buf 与上一轮 last_key；auto_step 跑完会清空 audio_buf。
         auto_cam.stream(
             fn=auto_step,
-            inputs=[auto_cam, audio_buf, last_key],
+            inputs=[auto_cam, audio_buf, last_key, session_label, reasoning_mode],
             outputs=outputs + [last_key, audio_buf],
             stream_every=AUTO_INTERVAL_SEC,
             show_progress="hidden",
@@ -294,7 +380,7 @@ def build_ui():
         # 手动模式按钮
         run_btn.click(
             fn=run_manual,
-            inputs=[man_img, man_audio],
+            inputs=[man_img, man_audio, session_label, reasoning_mode],
             outputs=outputs + [last_key],
         )
 
