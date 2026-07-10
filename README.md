@@ -43,7 +43,7 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 | ② | 疲劳检测 | `fatigue.py` | MediaPipe FaceLandmarker → EAR/MAR/PERCLOS | M4 |
 | ③ | 语音情绪 | `speech_emotion.py` | Qwen-Omni（智增增网关，OpenAI 兼容 API） | M2 |
 | — | 音频抽取 | `audio_extract.py` | ffmpeg 从视频抽 wav（实验用） | M2 |
-| ④ | 多模态融合 | `fusion.py` | 置信度加权 / 朴素融合两模式 | M2/M4 |
+| ④ | 多模态融合 | `fusion.py` | naive / weighted / weighted_cam / bayes 四模式 | M2/M4 |
 | ⑤ | LLM 需求推理 | `llm_reason.py` | ToM + 两段式 CoT，规则版 / DeepSeek-OpenAI 后端 | M3 |
 | ⑥ | 音乐生成 | `music_gen.py` | MusicGen (Hugging Face Transformers) | M3 |
 | ⑧ | UI + 集成 | `app.py` | Gradio 双模式，动态加载各模块 | M4 |
@@ -106,22 +106,26 @@ AIAA3800_Proj/
 ├── fatigue.py             # ② 疲劳检测 (M4)
 ├── speech_emotion.py      # ③ 语音情绪 (M2)
 ├── audio_extract.py       # 视频→wav 音频抽取工具 (M2)
-├── fusion.py              # ④ 多模态融合 (M2/M4)
+├── fusion.py              # ④ 多模态融合 naive/weighted/weighted_cam/bayes (M2/M4)
 ├── llm_reason.py          # ⑤ LLM 需求推理 (M3)
 ├── music_gen.py           # ⑥ 音乐生成 (M3)
 ├── requirements.txt       # 完整依赖清单（含最小 mock 说明）
 ├── .env.example           # 环境变量模板（复制成 .env 填 key）
 ├── requirements/          # 各成员依赖拆分 requirements_m1..m4.txt
 ├── scripts/
-│   ├── prepare_ravdess.py # RAVDESS 数据准备 → labels.csv（语音 in-domain，对照）
-│   ├── prepare_cremad.py  # CREMA-D 数据准备 → labels.csv（公平跨域，主实验）
-│   ├── run_ablation.py    # 感知层五臂消融评测（A-E）
-│   ├── gradcam_analysis.py# ⑦ GradCAM 可解释性实验 + 热力图（路线A）
-│   └── viz_fatigue.py     # ② 疲劳关键点可视化（pre 素材）
+│   ├── prepare_ravdess.py  # RAVDESS 数据准备 → labels.csv（语音 in-domain，对照）
+│   ├── prepare_cremad.py   # CREMA-D 数据准备 → labels.csv（公平跨域，主实验）
+│   ├── prepare_enterface.py# eNTERFACE'05 数据准备 → labels.csv（正脸+语义）
+│   ├── run_ablation.py     # 感知层五臂消融评测（A-E）
+│   ├── fusion_bayes.py     # 臂 F 逐类可靠性贝叶斯融合（读缓存 LOOCV / 导出先验）
+│   ├── gradcam_analysis.py # ⑦ GradCAM 可解释性实验 + 热力图（路线A）
+│   └── viz_fatigue.py      # ② 疲劳关键点可视化（pre 素材）
 ├── docs/
-│   └── experiment_plan.md # 消融实验详细方案 + 踩坑记录（报告 Experiments 章草稿）
+│   ├── experiment_plan.md # 感知层消融实验记录（报告 Experiments 章草稿）
+│   └── user_study.md      # 推理⑤/生成⑥/疲劳② 的 user study 方案（≤10 人）
 └── models/
-    └── face_landmarker.task  # MediaPipe 疲劳检测模型（3.7MB）
+    ├── face_landmarker.task     # MediaPipe 疲劳检测模型（3.7MB）
+    └── fusion_bayes_priors.json # 臂 F 逐类可靠性先验（离线学好、fusion.py bayes 模式加载，2.5KB）
 ```
 
 ---
@@ -201,14 +205,16 @@ neutral / happy / sad / angry / fear / surprise / disgust
 
 ### 6.4 ④ 多模态融合 `fusion.py`（M2/M4）
 
-- **`fuse(face, speech, fatigue, mode="weighted")`**，两模式对应消融 C/D 两臂：
+- **`fuse(face, speech, fatigue, mode="weighted")`**，四模式对应消融四臂：
 
   | mode | 实验臂 | 说明 |
   |------|--------|------|
   | `naive` | C 朴素融合 | 各投一票，不用 confidence 定主导；冲突用固定规则打破平票 |
   | `weighted` | D 置信度加权 | `score = 模态权重 × 置信度`，默认 face 0.45 / speech 0.55 |
+  | `weighted_cam` | E 加权+CAM门控 | 人脸权重 × GradCAM 可靠性（注意力跑到脸外→压低人脸） |
+  | `bayes` | F 贝叶斯逐类 | 按**离线学到的逐类可靠性**做朴素贝叶斯融合（`models/fusion_bayes_priors.json`）；唯一能越过最强单模态的模式（§3.7） |
 
-- 默认 `weighted`（`app.py` 走这个）。`fatigue` **不参与情绪投票**，只透传进统一状态 JSON。额外回传 `fusion_mode`/`face_emotion`/`speech_emotion`/`modal_agreement` 便于实验记录。
+- **默认 `weighted`**（`app.py` 走这个）。`bayes` 是可选增强：需要 `models/fusion_bayes_priors.json`（用 `scripts/fusion_bayes.py --export` 从验证集离线生成），缺文件时自动回退 `weighted`、不阻塞；输出情绪类别受限于先验的训练类，收益小且依赖领域匹配，故不设默认。`fatigue` **不参与情绪投票**，只透传。额外回传 `fusion_mode`/`face_emotion`/`speech_emotion`/`modal_agreement` 便于实验记录。
 
 ### 6.5 ⑤ LLM 需求推理 `llm_reason.py`（M3）
 
@@ -226,31 +232,34 @@ neutral / happy / sad / angry / fear / surprise / disgust
 
 **只做「感知层」定量消融**，证明我们自己的贡献——**融合④**：把预训练的人脸与语音融合，是否优于单模态。推理⑤/音乐⑥ 与疲劳② 归 user study / 定性评估。
 
-五个实验臂：A 仅人脸 · B 仅语音 · C 朴素融合 · **D 置信度加权融合** · **E 加权+GradCAM门控**（路线B）；指标 accuracy / macro-F1 / 逐类混淆矩阵（H1 融合>单模态、H2 加权>朴素、H3 模态互补、E vs D 看 CAM 是否有用）。
+实验臂：A 仅人脸 · B 仅语音 · C 朴素融合 · **D 置信度加权融合** · E 加权+GradCAM门控 · **F 贝叶斯逐类可靠性融合**（新，LOOCV 非泄漏）；指标 accuracy / macro-F1 / 逐类混淆矩阵。三假设：H1 融合>单模态、H2 加权>朴素、H3 模态互补。
 
-### 语音后端与数据集（关键 · 踩坑记录见 [docs/experiment_plan.md](docs/experiment_plan.md) §8）
+### 三条主要结论（7 轮实验，详见 [docs/experiment_plan.md](docs/experiment_plan.md)）
 
-- **语音后端**：通用 Qwen-Omni API 读不好情绪语调 → 消融改用**本地 SER**（wav2vec2），`SPEECH_BACKEND=ser` 启用。
-- **数据集选择很关键**：要让融合体现价值，两模态需**公平可比**。
-  - **RAVDESS**：语音 SER 在其上微调过 → **in-domain**，语音 0.88 碾压人脸 0.60（跨域），融合无从发挥。
-  - **CREMA-D（推荐）**：人脸(AffectNet) 与 语音(RAVDESS-SER) **都没在它上训练** → 两者都跨域、公平可比（6 类，无 surprise）→ 融合才有机会真正超过单模态。
+- **H2 稳固成立**：置信度加权 D 在各种模态失衡下都 > 朴素 C（对失衡**鲁棒**、优雅降级）——这是最扎实的结论。
+- **H1 有条件成立**：置信度加权从未越过最强单模态；直到用 **F 贝叶斯逐类融合**（按各模态**逐类历史可靠性**做朴素贝叶斯晚融合），才在**两模态势均力敌且互补**的 CREMA-D+emotion2vec 上首次越过（0.683 > 人脸 0.667）。即 **H1 需要「均衡+互补」+「逐类可靠性感知」两个条件**，margin 单段、作趋势呈现。
+- **语音后端选型**：**emotion2vec+ 跨数据集一致最佳**；Qwen-Omni API 读不好语调、wav2vec2(RAVDESS 微调)跨域即崩。
+
+### 语音后端与数据集
+
+- **语音后端**：`SPEECH_BACKEND=emotion2vec`（首选）/ `ser`(wav2vec2) / `api`(Qwen-Omni)。
+- **四个数据集**覆盖不同失衡与场景：**RAVDESS**(对照，语音 in-domain 碾压)、**CREMA-D**(公平跨域，主实验，两模态都不在其上训练)、**MELD**(真实对话有语义、但多人/侧脸致人脸失效)、**eNTERFACE'05**(正面单人脸+情绪语义句，验证 MELD 人脸问题是几何性的)。
 
 ```bash
-# 方案一 · RAVDESS（语音 in-domain，作对照）
-python scripts/prepare_ravdess.py --actors 01 02 05 --n 50 --out data/ravdess
-SPEECH_BACKEND=ser python scripts/run_ablation.py --data data/ravdess --out results/ablation --refresh
-
-# 方案二 · CREMA-D（公平跨域，主实验）——先下载视频版数据到某目录
+# 主实验 · CREMA-D（公平跨域）——先下载视频版数据
 python scripts/prepare_cremad.py --src <CREMA-D视频目录> --n 60 --out data/cremad
-SPEECH_BACKEND=ser python scripts/run_ablation.py --data data/cremad --out results/ablation_cremad --refresh
+SPEECH_BACKEND=emotion2vec python scripts/run_ablation.py --data data/cremad --out results/ablation_cremad_e2v --refresh
 #   --limit 6 快速冒烟；--fusion-only 只用缓存重算融合臂
+
+# 逐类可靠性贝叶斯融合（arm F，读缓存、不重跑感知）—— H1 在此首次成立
+python scripts/fusion_bayes.py --data data/cremad --cache results/ablation_cremad_e2v
 
 # 可解释性 + pre 可视化（⑦ 与 ② 的展示素材，同样支持 --data）
 python scripts/gradcam_analysis.py --data data/cremad
 python scripts/viz_fatigue.py --data data/cremad
 ```
 
-完整方案（假设、五臂、指标、疲劳定位、语音踩坑、数据集公平性、局限性）见 **[docs/experiment_plan.md](docs/experiment_plan.md)**。
+其他数据集准备：`prepare_ravdess.py`（自动下载）、`prepare_enterface.py --src <eNTERFACE目录>`。完整方案与踩坑见 **[docs/experiment_plan.md](docs/experiment_plan.md)**。
 
 ---
 
@@ -262,6 +271,11 @@ python scripts/viz_fatigue.py --data data/cremad
 | M2 | 语音情绪 + 融合 + 音频抽取 | Methodology §感知 + 融合 |
 | M3 | LLM 推理 + 音乐生成 | Methodology §LLM + 生成 |
 | M4 | 疲劳检测 + UI 集成 + 消融评测 | Experiments、User Study、Conclusion（统稿） |
+
+> **消融实验（寻找能证明 H1 的实验设置）是 M1/M2/M4 的联合探索**（核心模块分工不变）：
+> - **M1**：规划并运行了整套感知层消融、找到 **CREMA-D 数据集**与 **SER 语音模型**、并在 M4 的基础上发现了**贝叶斯逐类融合（arm F）**让 H1 成立的可能性。
+> - **M4**：找到 **emotion2vec+** 语音模型（跨数据集最佳后端）。
+> - **M2**：找到 **MELD 数据集**（真实对话/语义场景，暴露人脸在非正脸下失效）。
 
 ---
 
@@ -300,9 +314,10 @@ ffmpeg 是系统程序不是 pip 包，`conda install -n 3800 -c conda-forge ffm
 ## 10. 局限性（写进报告 Limitations）
 
 - **表演数据**：RAVDESS 是专业演员的表演情绪，与真实自发情绪有分布差异。
-- **样本量小**：~50 段 / 7 类 ≈ 每类 7 段，统计力有限，结论以趋势呈现。
+- **样本量小**：每个数据集 50–60 段 / 6–7 类 ≈ 每类 ~10 段，统计力有限（H1 的 arm F 越过仅 +1 段），结论以趋势呈现。
 - **预训练编码器**：单模态准确率取决于预训练模型本身，不代表我们的工作；贡献在**融合策略**与**系统集成**。
-- **语音置信度**：来自模型自评 + 规则校准，非严格概率；实验需观察它与真实正确率是否匹配。
+- **语音置信度**：`api` 后端为模型自评+规则校准（非严格概率）；`ser`/`emotion2vec` 为 softmax 概率。
+- **bayes 融合泛化性**：臂 F 的逐类先验在 CREMA-D 上学，迁移到真实部署分布的收益未验证，故默认仍用 weighted。
 - **语音在线 API**：速度/稳定性受网络影响，自动模式每轮同步调用会有延迟（见 experiment_plan 与后续优化）。
 - **疲劳单帧**：用跨调用滚动窗口近似 PERCLOS，换用户应调 `fatigue.reset_history()`。
 
