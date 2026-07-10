@@ -27,6 +27,16 @@ opencv-python
 # ---- M2 · 语音情绪③（Qwen-Omni via OpenAI 兼容 API）----
 openai>=1.0.0
 python-dotenv>=1.0.0
+# 本地 SER 后端（消融用，SPEECH_BACKEND=ser|emotion2vec）：
+#   ser        → wav2vec2 (ehcalabres)，需 librosa 读音频
+#   emotion2vec → emotion2vec+ (iic/emotion2vec_plus_base)，走 FunASR/ModelScope，首次自动下载权重
+# ⚠️ funasr 在 import 时硬依赖 torchaudio，且 torchaudio 版本须与已装 torch 匹配。
+#    本机 torch=2.12.1+cu126，PyPI 尚无 2.12 的 torchaudio，用 2.11 且 --no-deps 免得动 torch：
+#      pip install --no-deps "torchaudio==2.11.0+cu126" --index-url https://download.pytorch.org/whl/cu126
+#    （一个小版本的 skew 实测可正常 load；故此处不写死 torchaudio 版本，按你的 torch 自行匹配）
+librosa
+funasr
+modelscope
 
 # ---- M3 · LLM 推理⑤（DeepSeek/OpenAI）+ 音乐生成⑥（MusicGen）----
 transformers>=4.31.0
