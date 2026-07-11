@@ -36,6 +36,8 @@ MODEL_DIR = Path(
 
 # Keep short for live demo / user study stability.
 DEFAULT_DURATION_SEC = int(os.getenv("MUSICGEN_DURATION_SEC", "20"))
+# UI 可拖动选择的生成时长上限（秒）。0 表示不生成（静音）。
+MAX_DURATION_SEC = int(os.getenv("MUSICGEN_MAX_DURATION_SEC", "120"))
 OUTPUT_DIR = Path(os.getenv("MUSICGEN_OUTPUT_DIR", "outputs"))
 
 # Lazy-loaded MusicGen singletons (Transformers API, per course demo)
@@ -104,7 +106,8 @@ def _get_model():
     return _MODEL, _PROCESSOR, _DEVICE, _SAMPLE_RATE
 
 
-def _generate_with_musicgen(music_spec: str, output_stem: str) -> Optional[str]:
+def _generate_with_musicgen(music_spec: str, output_stem: str,
+                            duration_sec: float = DEFAULT_DURATION_SEC) -> Optional[str]:
     """
     Generate audio with MusicGen (Transformers).
     Returns path to .wav on success, None on any failure.
@@ -121,7 +124,8 @@ def _generate_with_musicgen(music_spec: str, output_stem: str) -> Optional[str]:
             return_tensors="pt",
         ).to(device)
 
-        max_new_tokens = int(DEFAULT_DURATION_SEC * 50)  # 50 tokens ≈ 1 second
+        # 50 tokens ≈ 1 second；按 UI 选择的时长换算生成 token 数（至少 1）。
+        max_new_tokens = max(1, int(float(duration_sec) * 50))
 
         with torch.no_grad():
             audio_values = model.generate(
@@ -145,7 +149,8 @@ def _generate_with_musicgen(music_spec: str, output_stem: str) -> Optional[str]:
         return None
 
 
-def _generate_fallback_wav(music_spec: str, output_path: str) -> Optional[str]:
+def _generate_fallback_wav(music_spec: str, output_path: str,
+                           duration_sec: float = 4.0) -> Optional[str]:
     """
     Simple synthetic wav for UI / pipeline testing when MusicGen is unavailable.
     Uses numpy + stdlib wave only.
@@ -153,7 +158,7 @@ def _generate_fallback_wav(music_spec: str, output_path: str) -> Optional[str]:
     try:
         style = _classify_prompt_style(music_spec)
         sr = 22050
-        duration = 4.0
+        duration = max(0.1, float(duration_sec))   # 按 UI 选择的时长合成占位音频
         n = int(sr * duration)
         t = np.linspace(0.0, duration, n, endpoint=False)
 
@@ -188,31 +193,40 @@ def _generate_fallback_wav(music_spec: str, output_path: str) -> Optional[str]:
         return None
 
 
-def generate(music_spec: str) -> AudioReturn:
+def generate(music_spec: str, duration_sec: Optional[float] = None) -> AudioReturn:
     """
     Generate music from an English text prompt.
 
     Args:
         music_spec: Music description string from llm_reason.infer()["music_spec"].
+        duration_sec: Desired music length in seconds (UI slider, 0–MAX_DURATION_SEC).
+            None → fall back to DEFAULT_DURATION_SEC. <=0 → 不生成，返回 None（静音）。
 
     Returns:
-        str path to .wav (preferred), or None on total failure.
+        str path to .wav (preferred), or None on total failure / zero-length request.
     """
     try:
         prompt = str(music_spec or "").strip()
         if not prompt:
             return None
 
+        # 解析并夹紧到 [0, MAX_DURATION_SEC]；0 表示不生成（静音）。
+        dur = DEFAULT_DURATION_SEC if duration_sec is None else float(duration_sec)
+        dur = max(0.0, min(float(MAX_DURATION_SEC), dur))
+        if dur <= 0:
+            print("[M3] duration=0 → 不生成音乐（静音）。")
+            return None
+
         stem = _get_output_stem()
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         out_path = str(OUTPUT_DIR / f"{stem}.wav")
 
-        result = _generate_with_musicgen(prompt, stem)
+        result = _generate_with_musicgen(prompt, stem, dur)
         if result and Path(result).is_file():
             return result
 
         print("[M3] MusicGen unavailable, using fallback wav.")
-        return _generate_fallback_wav(prompt, out_path)
+        return _generate_fallback_wav(prompt, out_path, dur)
     except Exception:
         return None
 

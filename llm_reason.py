@@ -907,6 +907,126 @@ def infer(state: dict) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# 面向用户的一句话摘要（由 LLM 生成；供 app.py 的「给你的说明」用）
+# ---------------------------------------------------------------------------
+
+_USER_SUMMARY_SYSTEM = {
+    "en": (
+        "You are EmotiCompanion, a warm, supportive music companion (NOT a medical device). "
+        "In 1-2 short, friendly sentences, tell the user how they seem right now (their emotion "
+        "and tiredness) and what kind of music you've picked to keep them company. Use gentle, "
+        "cautious, everyday language (may / seem / a little). Never diagnose or use clinical terms. "
+        "Reply in English only. Plain text, no lists, no headers."
+    ),
+    "zh": (
+        "你是 EmotiCompanion，一个温暖、贴心的音乐陪伴助手（不是医疗设备）。"
+        "用 1-2 句简短、亲切的话，告诉用户 ta 现在的状态（情绪和疲惫程度），以及你为 ta 挑了什么样的音乐来陪伴。"
+        "语气温和、留有余地（可能 / 似乎 / 有点），绝不做诊断、不用临床术语。"
+        "只用中文回答，纯文本，不要列表、不要标题。"
+    ),
+}
+
+
+def _call_user_summary_llm(system_prompt: str, user_content: str) -> str | None:
+    """调 OpenAI 兼容 API 生成一段自然语言短句；无 key / 不安全 → None。"""
+    api_key = _get_llm_api_key()
+    if not api_key:
+        return None
+    model = _get_llm_model()
+    base_url = _get_llm_base_url()
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.6,
+        max_tokens=180,
+    )
+    text = (response.choices[0].message.content or "").strip()
+    if not text or _contains_unsafe_language(text):   # 复用诊断性措辞拦截
+        return None
+    return _truncate_field(text, 400)
+
+
+def summarize_for_user(state: dict, need: dict | None, lang: str = "en") -> str | None:
+    """根据 ④ 状态 + ⑤ need 生成一两句面向用户的话（'en' / 'zh'）。
+
+    仅在配置了 LLM API 后端时调用真实模型（与 infer() 同一后端）；
+    未配置 / 出错 → 返回 None，交由 app.py 用模板兜底。
+    """
+    if not _uses_llm_api():
+        return None
+    try:
+        lang = "zh" if str(lang).lower().startswith("zh") else "en"
+        n = _normalize_state(state)
+        need = need or {}
+        user_content = (
+            f"Observed state — emotion: {n['dominant_emotion']}, fatigue: {n['fatigue']}, "
+            f"confidence: {n['confidence']:.2f}.\n"
+            f"Inferred need: {need.get('need', '')}.\n"
+            f"Chosen music (MusicGen prompt): {need.get('music_spec', '')}.\n"
+            "Now write the short message for the user."
+        )
+        return _call_user_summary_llm(_USER_SUMMARY_SYSTEM[lang], user_content)
+    except Exception as exc:
+        print(f"[M3] summarize_for_user unavailable ({type(exc).__name__}), fallback to template.")
+        return None
+
+
+_USER_SUMMARY_BOTH_SYSTEM = {
+    "en": (
+        "You are EmotiCompanion, a warm, supportive music companion (NOT a medical device). "
+        "In 2-3 short, friendly sentences: first tell the user how they seem right now (their "
+        "emotion and tiredness); then say you've prepared TWO music versions to compare — "
+        "version A from two-stage Theory-of-Mind + chain-of-thought reasoning, and version B "
+        "from a simple direct emotion-to-style baseline — and briefly hint what each feels like. "
+        "Gentle, cautious, everyday language (may / seem). Never diagnose or use clinical terms. "
+        "Reply in English only. Plain text, no lists, no headers."
+    ),
+    "zh": (
+        "你是 EmotiCompanion，一个温暖、贴心的音乐陪伴助手（不是医疗设备）。"
+        "用 2-3 句简短、亲切的话：先说用户现在的状态（情绪和疲惫程度），"
+        "再说明你准备了两个可对比的音乐版本——A 来自两段式 ToM+CoT 推理，B 来自简单的直接基线，"
+        "并简短点出各自大概的感觉。语气温和、留有余地（可能 / 似乎），绝不做诊断、不用临床术语。"
+        "只用中文回答，纯文本，不要列表、不要标题。"
+    ),
+}
+
+
+def summarize_both_for_user(state: dict, need_tom: dict | None,
+                            need_std: dict | None, lang: str = "en") -> str | None:
+    """Both 模式：根据 ④ 状态 + 两种推理各自的 need，生成一段对比两版音乐的话。
+
+    与 summarize_for_user 同一后端（DeepSeek/OpenAI）；未配置 / 出错 → None，由上层用模板兜底。
+    """
+    if not _uses_llm_api():
+        return None
+    try:
+        lang = "zh" if str(lang).lower().startswith("zh") else "en"
+        n = _normalize_state(state)
+        need_tom = need_tom or {}
+        need_std = need_std or {}
+        user_content = (
+            f"Observed state — emotion: {n['dominant_emotion']}, fatigue: {n['fatigue']}, "
+            f"confidence: {n['confidence']:.2f}.\n"
+            f"Version A (ToM+CoT) — need: {need_tom.get('need', '')}; "
+            f"music: {need_tom.get('music_spec', '')}.\n"
+            f"Version B (Standard) — need: {need_std.get('need', '')}; "
+            f"music: {need_std.get('music_spec', '')}.\n"
+            "Now write the short message for the user comparing the two versions."
+        )
+        return _call_user_summary_llm(_USER_SUMMARY_BOTH_SYSTEM[lang], user_content)
+    except Exception as exc:
+        print(f"[M3] summarize_both_for_user unavailable ({type(exc).__name__}), fallback to template.")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
 

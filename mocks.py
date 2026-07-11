@@ -111,7 +111,8 @@ class MockMusic:
     """⑥ 音乐生成的 mock（对应 music_gen.py）"""
 
     @staticmethod
-    def generate(music_spec):
+    def generate(music_spec, duration_sec=None):
         # 真实音乐模块未就绪时不乱生成占位音符，直接返回空白（None）。
         # UI 的音频栏会保持为空，不会播放任何声音。
+        # 保留 duration_sec 参数只为与真实 generate() 的签名对齐（mock 忽略它）。
         return None
