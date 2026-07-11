@@ -45,6 +45,8 @@ from pathlib import Path
 from config import EMOTION_LABELS, MOCK_EMOTION
 from dotenv import load_dotenv
 
+load_dotenv()
+
 
 # ============================================================
 # API configuration
@@ -247,7 +249,18 @@ def _predict_ser(audio_path):
 # （笔记本友好；iic/emotion2vec_plus_large 精度更高但权重 1.95G，低内存机器会 OOM，
 #  实测 <5G 空闲内存跑 large 会 alloc 失败，改 EMO2VEC_MODEL 切换）。
 
-EMO2VEC_MODEL_NAME = os.getenv("EMO2VEC_MODEL", "iic/emotion2vec_plus_base")
+EMO2VEC_MODEL_NAME = os.getenv(
+    "EMO2VEC_MODEL_DIR",
+    os.getenv(
+        "EMOTION2VEC_MODEL_DIR",
+        os.getenv("EMO2VEC_MODEL", "/home/user/models/emotion2vec_plus_large"),
+    ),
+)
+
+EMO2VEC_DEVICE = os.getenv(
+    "EMO2VEC_DEVICE",
+    os.getenv("EMOTION2VEC_DEVICE", "cuda:0"),
+)
 
 # emotion2vec+ 原生 9 类（中文/English 双语标签，取 "/" 后的英文）→ 全队 7 类契约词表。
 # other / unknown 不属于 7 类情绪：默认从 argmax 中排除（见下 EMO2VEC_EXCLUDE_OTHER），
@@ -287,15 +300,33 @@ def _emo2vec_label_en(raw):
 def _lazy_emotion2vec():
     """首次调用时用 FunASR AutoModel 载入 emotion2vec+ 检查点（懒加载单例）。
 
-    首次会自动从 ModelScope 下载权重到本地缓存；离线环境请预先 modelscope download。
+    优先从 EMO2VEC_MODEL_DIR / EMOTION2VEC_MODEL_DIR 指定的本地目录加载；
+    若传入的是 iic/emotion2vec_plus_* 这类模型名，才会走 ModelScope 缓存/下载。
     """
     global _EMO2VEC_MODEL
     if _EMO2VEC_MODEL is not None:
         return
+
     from funasr import AutoModel
+    import torch
+
+    model_source = str(Path(EMO2VEC_MODEL_NAME).expanduser())
+    if not Path(model_source).exists():
+        model_source = EMO2VEC_MODEL_NAME
+
+    device = EMO2VEC_DEVICE
+    if str(device).startswith("cuda") and not torch.cuda.is_available():
+        device = "cpu"
+
+    print(f"[speech] loading emotion2vec from: {model_source}")
+    print(f"[speech] emotion2vec device: {device}")
 
     # disable_update=True 关掉 FunASR 每次启动的联网版本检查（离线/内网更稳）
-    _EMO2VEC_MODEL = AutoModel(model=EMO2VEC_MODEL_NAME, disable_update=True)
+    _EMO2VEC_MODEL = AutoModel(
+        model=model_source,
+        device=device,
+        disable_update=True,
+    )
 
 
 def _predict_emotion2vec(audio_path):
@@ -720,7 +751,7 @@ def predict(audio_path):
     # 本地后端（RAVDESS 消融用），默认 api（部署保留语义能力）：
     #   SPEECH_BACKEND=ser          → wav2vec2（ehcalabres，in-domain 微调）
     #   SPEECH_BACKEND=emotion2vec  → emotion2vec+（自监督预训练，跨域）
-    backend = os.getenv("SPEECH_BACKEND", "api").strip().lower()
+    backend = os.getenv("SPEECH_BACKEND", "emotion2vec").strip().lower()
     if backend in {"emotion2vec", "emo2vec", "e2v"}:
         try:
             return _predict_emotion2vec(audio_path)

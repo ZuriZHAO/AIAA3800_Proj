@@ -13,6 +13,7 @@ EmotiCompanion · AIAA 3800 · HKUST(GZ)
 
 from __future__ import annotations
 
+import os
 import random
 import wave
 from datetime import datetime
@@ -24,8 +25,18 @@ import numpy as np
 AudioReturn = Union[str, tuple[int, np.ndarray], None]
 
 MODEL_NAME = "facebook/musicgen-small"
-DEFAULT_DURATION_SEC = 8
-OUTPUT_DIR = Path("outputs")
+
+# Prefer local MusicGen model directory to avoid Hugging Face network access.
+MODEL_DIR = Path(
+    os.getenv(
+        "MUSICGEN_MODEL_DIR",
+        "/home/user/models/musicgen-small"
+    )
+)
+
+# Keep short for live demo / user study stability.
+DEFAULT_DURATION_SEC = int(os.getenv("MUSICGEN_DURATION_SEC", "20"))
+OUTPUT_DIR = Path(os.getenv("MUSICGEN_OUTPUT_DIR", "outputs"))
 
 # Lazy-loaded MusicGen singletons (Transformers API, per course demo)
 _MODEL = None
@@ -62,7 +73,7 @@ def _classify_prompt_style(music_spec: str) -> PromptStyle:
 
 
 def _get_model():
-    """Lazy-load MusicGen via Hugging Face Transformers (course demo API)."""
+    """Lazy-load MusicGen via Hugging Face Transformers, prefer local model dir."""
     global _MODEL, _PROCESSOR, _DEVICE, _SAMPLE_RATE
     if _MODEL is not None:
         return _MODEL, _PROCESSOR, _DEVICE, _SAMPLE_RATE
@@ -71,8 +82,23 @@ def _get_model():
     from transformers import AutoProcessor, MusicgenForConditionalGeneration
 
     _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    _PROCESSOR = AutoProcessor.from_pretrained(MODEL_NAME)
-    _MODEL = MusicgenForConditionalGeneration.from_pretrained(MODEL_NAME).to(_DEVICE)
+
+    use_local = MODEL_DIR.exists() and any(MODEL_DIR.iterdir())
+    model_source = str(MODEL_DIR) if use_local else MODEL_NAME
+
+    print(f"[M3] Loading MusicGen from: {model_source}")
+    print(f"[M3] Device: {_DEVICE}")
+
+    _PROCESSOR = AutoProcessor.from_pretrained(
+        model_source,
+        local_files_only=use_local,
+    )
+
+    _MODEL = MusicgenForConditionalGeneration.from_pretrained(
+        model_source,
+        local_files_only=use_local,
+    ).to(_DEVICE)
+
     _MODEL.eval()
     _SAMPLE_RATE = int(_MODEL.config.audio_encoder.sampling_rate)
     return _MODEL, _PROCESSOR, _DEVICE, _SAMPLE_RATE
@@ -111,7 +137,8 @@ def _generate_with_musicgen(music_spec: str, output_stem: str) -> Optional[str]:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         scipy.io.wavfile.write(str(out_path), rate=sample_rate, data=wav)
         return str(out_path)
-    except Exception:
+    except Exception as e:
+        print("[M3] MusicGen generation failed:", repr(e))
         # Reset lazy singleton so a later retry can reload after env fix
         global _MODEL, _PROCESSOR, _DEVICE, _SAMPLE_RATE
         _MODEL = _PROCESSOR = _DEVICE = _SAMPLE_RATE = None

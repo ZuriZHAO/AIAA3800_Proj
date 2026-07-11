@@ -40,6 +40,10 @@ import tempfile
 import time
 import wave
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # 让本地回环地址绕过系统/环境代理。否则开了科学上网（系统代理指向
 # 127.0.0.1:xxxx）时，gradio 启动后自检 http://127.0.0.1 的请求会被代理
 # 拦截返回 502，导致 app.launch() 直接抛异常退出。在这里把 localhost 加进
@@ -63,8 +67,14 @@ os.environ.setdefault("SPEECH_BACKEND", "emotion2vec")
 import numpy as np
 import gradio as gr
 
-from config import AUTO_INTERVAL_SEC
+from config import AUTO_INTERVAL_SEC as CONFIG_AUTO_INTERVAL_SEC
 import mocks
+
+# Auto mode timing:
+# AUTO_INTERVAL_SEC: perception/fusion refresh interval
+# MUSIC_REFRESH_SEC: when state is unchanged, generate a fresh music variation after this many seconds
+AUTO_INTERVAL_SEC = int(os.getenv("AUTO_INTERVAL_SEC", str(CONFIG_AUTO_INTERVAL_SEC)))
+MUSIC_REFRESH_SEC = int(os.getenv("MUSIC_REFRESH_SEC", "90"))
 
 
 # =============================================================================
@@ -99,12 +109,19 @@ def _state_key(state):
     return (state.get("dominant_emotion"), state.get("fatigue"))
 
 
-def _perceive_and_fuse(image, audio):
+def _perceive_and_fuse(image, audio, speech_mode=None):
     """跑 ①②③ 感知 + ⑦ 热力图 + ④ 融合，返回 (perception, heatmap, state)。"""
+    backend = _set_speech_backend_from_ui(speech_mode)
     face = FACE.predict(image)          # ① 人脸情绪 (M1)
     heatmap = FACE.gradcam(image)       # ⑦ GradCAM (M1)
     fatigue = FATIGUE.predict(image)    # ② 疲劳/压力 (M4)
     speech = SPEECH.predict(audio)      # ③ 语音情绪 (M2)
+
+    # 在 UI 输出里显式记录本次使用的 speech backend，方便 user study / debug 对齐。
+    if isinstance(speech, dict):
+        speech = dict(speech)
+        speech.setdefault("backend", backend)
+
     state = FUSION.fuse(face, speech, fatigue)  # ④ 融合 (M2/M4)
     perception = {"face": face, "speech": speech, "fatigue": fatigue}
     return perception, heatmap, state
@@ -188,17 +205,47 @@ def _dump(obj):
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
+
+# =============================================================================
+# Speech backend UI helper
+# =============================================================================
+
+SPEECH_MODE_CHOICES = [
+    "emotion2vec (local, recommended)",
+    "API / Qwen-Omni",
+]
+
+
+def _speech_mode_label_from_env():
+    """Map SPEECH_BACKEND env value to the Gradio radio label."""
+    backend = os.getenv("SPEECH_BACKEND", "emotion2vec").strip().lower()
+    if backend in {"api", "qwen", "qwen-omni", "qwen_omni"}:
+        return "API / Qwen-Omni"
+    return "emotion2vec (local, recommended)"
+
+
+def _set_speech_backend_from_ui(speech_mode):
+    """Set SPEECH_BACKEND before calling speech_emotion.predict()."""
+    text = str(speech_mode or "").strip().lower()
+    if "api" in text or "qwen" in text:
+        backend = "api"
+    else:
+        backend = "emotion2vec"
+
+    os.environ["SPEECH_BACKEND"] = backend
+    return backend
+
 # =============================================================================
 # 手动模式 —— 单次运行完整 pipeline（总是重新生成音乐）
 # =============================================================================
 
-def run_manual(image, audio, session_label=None, reasoning_mode="tom_cot"):
-    perception, heatmap, state = _perceive_and_fuse(image, audio)
+def run_manual(image, audio, session_label=None, reasoning_mode="tom_cot", speech_mode=None):
+    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode)
     reasoning_text, music = _reason_and_compose(state, session_label, reasoning_mode)
     _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
     # 同时把本次 state_key 写回 last_key，避免切到自动模式时重复生成
     return (heatmap, _dump(perception), _dump(state),
-            reasoning_text, music, _state_key(state))
+            reasoning_text, music, _state_key(state), time.time())
 
 
 # =============================================================================
@@ -207,7 +254,7 @@ def run_manual(image, audio, session_label=None, reasoning_mode="tom_cot"):
 #   不论是否变化，都刷新一个时间戳「心跳」，让你一眼看出 pipeline 在跑
 # =============================================================================
 
-def auto_step(image, audio_buffer, last_key, session_label=None, reasoning_mode="tom_cot"):
+def auto_step(image, audio_buffer, last_key, last_music_ts, session_label=None, reasoning_mode="tom_cot", speech_mode=None):
     """摄像头流式回调：拿当前帧 + 最近一段录音，感知融合，按需更换音乐。
 
     输出顺序对齐 UI：
@@ -217,25 +264,29 @@ def auto_step(image, audio_buffer, last_key, session_label=None, reasoning_mode=
     if image is None:
         # 摄像头还没就绪：刷新心跳提示，其余不动
         note = f"[{ts}] waiting for camera frame..."
-        return (gr.skip(), gr.skip(), gr.skip(), note, gr.skip(), last_key, [])
+        return (gr.skip(), gr.skip(), gr.skip(), note, gr.skip(), last_key, last_music_ts, [])
 
     audio = buffer_to_wav(audio_buffer)
-    perception, heatmap, state = _perceive_and_fuse(image, audio)
+    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode)
     key = _state_key(state)
 
-    # 情绪与压力都没变 → 不重新推理/生成，音乐继续播；仍刷新感知/状态/心跳
-    if key == last_key:
-        note = (f"[{ts}] running · state unchanged "
-                f"(emotion={key[0]}, fatigue={key[1]}) · keeping current music.")
-        return (heatmap, _dump(perception), _dump(state),
-                note, gr.skip(), last_key, [])
-
-    # 状态变化 → 重新推理并生成新音乐
+    # Auto mode: every valid detection generates a fresh music clip.
+    # Even if emotion/fatigue are unchanged, we regenerate a same-state variation
+    # so the companion does not become silent or feel static after the previous clip ends.
     reasoning_text, music = _reason_and_compose(state, session_label, reasoning_mode)
     _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
-    reasoning_text = f"[{ts}] state CHANGED → regenerated music.\n\n" + reasoning_text
+
+    if key == last_key:
+        reasoning_text = (
+            f"[{ts}] state unchanged "
+            f"(emotion={key[0]}, fatigue={key[1]}) → regenerated a new same-state music variation.\n\n"
+            + reasoning_text
+        )
+    else:
+        reasoning_text = f"[{ts}] state CHANGED → regenerated music.\n\n" + reasoning_text
+
     return (heatmap, _dump(perception), _dump(state),
-            reasoning_text, music, key, [])
+            reasoning_text, music, key, time.time(), [])
 
 
 def accumulate_audio(new_chunk, buffer):
@@ -289,6 +340,7 @@ def build_ui():
 
         # 跨回调共享的会话状态
         last_key = gr.State(None)    # 上一次的 (emotion, fatigue)，用于判断是否换音乐
+        last_music_ts = gr.State(0.0) # 上一次生成音乐的时间戳，用于状态不变时定期刷新 variation
         audio_buf = gr.State([])     # 麦克风流式音频缓冲（numpy chunk 列表）
 
         mode = gr.Radio(
@@ -314,6 +366,14 @@ def build_ui():
             value="ToM+CoT (default)",
             label="⑤ Reasoning mode",
             info="对比用：默认 ToM+CoT 两段式推理；切 Standard 看直接查表基线（user study Q3）。",
+        )
+
+        # Speech backend：用于 demo / 消融 / debug 切换三种语音情绪识别模式。
+        speech_mode = gr.Radio(
+            SPEECH_MODE_CHOICES,
+            value=_speech_mode_label_from_env(),
+            label="③ Speech backend",
+            info="默认 emotion2vec；可切 API/Qwen-Omni 做对比。切换后下一次运行生效。",
         )
 
         # ---------------- 自动模式区 ----------------
@@ -371,8 +431,8 @@ def build_ui():
         # 并带上累积的 audio_buf 与上一轮 last_key；auto_step 跑完会清空 audio_buf。
         auto_cam.stream(
             fn=auto_step,
-            inputs=[auto_cam, audio_buf, last_key, session_label, reasoning_mode],
-            outputs=outputs + [last_key, audio_buf],
+            inputs=[auto_cam, audio_buf, last_key, last_music_ts, session_label, reasoning_mode, speech_mode],
+            outputs=outputs + [last_key, last_music_ts, audio_buf],
             stream_every=AUTO_INTERVAL_SEC,
             show_progress="hidden",
         )
@@ -380,8 +440,8 @@ def build_ui():
         # 手动模式按钮
         run_btn.click(
             fn=run_manual,
-            inputs=[man_img, man_audio, session_label, reasoning_mode],
-            outputs=outputs + [last_key],
+            inputs=[man_img, man_audio, session_label, reasoning_mode, speech_mode],
+            outputs=outputs + [last_key, last_music_ts],
         )
 
         # ---------------- 模式切换 ----------------
