@@ -1,0 +1,18 @@
+# M4 模块（fatigue.py：② 疲劳检测 + scripts/run_ablation.py：消融评测）的依赖
+# 在 3800 环境里安装。框架本身的依赖见根目录 requirements.txt。
+#
+# ② 疲劳检测走「面部关键点 → EAR/MAR/PERCLOS → 疲劳等级」这条轻量链路：
+#   · 首选 MediaPipe FaceMesh（468 点，CPU 友好，laptop-friendly）。
+#   · 未装 MediaPipe 时 fatigue.py 自动退化为 OpenCV Haar 眼睛级联的睁/闭眼粗判，
+#     所以 opencv-python 是必需的、mediapipe 是可选增强。
+#
+# 消融评测脚本 run_ablation.py 复用人脸①(face_emotion)、语音③(speech_emotion)、
+# 音频抽取(audio_extract)、融合④(fusion) 这些成员模块，指标(accuracy/F1/混淆矩阵)
+# 手写实现、不引入 sklearn；抽帧读视频用 opencv-python，抽音频用 audio_extract
+# 依赖的 ffmpeg（见 M2 说明）。因此本文件只需再声明 opencv-python / numpy。
+
+opencv-python
+numpy
+
+# 可选：装上可显著提升疲劳检测精度（有 EAR/MAR 精确关键点；不装则走 Haar 兜底）
+mediapipe

@@ -11,20 +11,29 @@ Project contract used by app.py:
         "fatigue_conf": float
     }
 
-This file supports two fusion modes required by the ablation experiment:
-    1. naive    : equal-vote / simple voting baseline
-    2. weighted : confidence-weighted fusion, default for the real app
+Fusion modes:
+    1. naive        : equal-vote / simple voting baseline (arm C)
+    2. weighted     : confidence-weighted fusion, DEFAULT for the real app (arm D)
+    3. weighted_cam : weighted + GradCAM face-reliability gating (arm E)
+    4. bayes        : per-class-reliability Bayesian late fusion (arm F). Uses offline-
+                      learned confusion likelihoods (fusion_bayes_priors.json). This is the
+                      only mode that beat the best single modality on a balanced regime
+                      (see docs/experiment_plan.md §3.7). NOT default: gain is small and
+                      depends on the priors matching the deployment distribution; the
+                      output class set is limited to the priors' training classes.
 
 Usage in app.py:
-    state = fuse(face, speech, fatigue)  # defaults to weighted
-
+    state = fuse(face, speech, fatigue)          # defaults to weighted
 Usage in experiments:
     state_c = fuse(face, speech, fatigue, mode="naive")
     state_d = fuse(face, speech, fatigue, mode="weighted")
+    state_f = fuse(face, speech, fatigue, mode="bayes")
 """
 
 from __future__ import annotations
 
+import json
+import math
 import os
 from typing import Dict, Mapping, Optional, Tuple
 
@@ -167,28 +176,40 @@ def fuse_naive(face, speech, fatigue=None) -> Dict:
     )
 
 
-def fuse_weighted(face, speech, fatigue=None) -> Dict:
+def fuse_weighted(face, speech, fatigue=None, use_reliability=False) -> Dict:
     """
-    Weighted fusion arm D: confidence-weighted voting.
+    Weighted fusion: confidence-weighted voting.
 
     Score(emotion) = sum(static_modality_weight * modality_confidence)
     The modality weights are normalized over active modalities. Fatigue is not used
     for emotion voting; it is passed through as an independent arousal/energy signal.
+
+    use_reliability=False -> arm D（原样）。
+    use_reliability=True  -> arm E（路线B · CAM 门控）：把人脸权重乘以 GradCAM 派生的
+      人脸可靠性 face["reliability"]∈[0,1]（缺省 1.0=不门控）。注意力跑到脸外→可靠性低
+      →人脸权重被压低、语音占比升高。可靠性怎么算见 face_emotion.cam_reliability()。
     """
     face_emo, face_conf, speech_emo, speech_conf, fatigue_level, fatigue_conf = _read_inputs(
         face, speech, fatigue
     )
 
+    mode_str = "weighted_cam" if use_reliability else "weighted"
+
+    # 人脸可靠性：只在 arm E 生效；设 0.1 下限，避免 r=0 且语音缺失时 weight_sum 为 0。
+    r_face = 1.0
+    if use_reliability:
+        r_face = max(0.1, _clamp01(face.get("reliability", 1.0)))
+
     active = []
     if face_conf > 0.0:
-        active.append(("face", face_emo, FACE_WEIGHT, face_conf))
+        active.append(("face", face_emo, FACE_WEIGHT * r_face, face_conf))
     if speech_conf > 0.0:
         active.append(("speech", speech_emo, SPEECH_WEIGHT, speech_conf))
 
     if not active:
         return _result(
             MOCK_EMOTION, 0.0, fatigue_level, face_conf, speech_conf, fatigue_conf,
-            "weighted", face_emo, speech_emo
+            mode_str, face_emo, speech_emo
         )
 
     # Normalize weights over available modalities, so if one modality is missing,
@@ -215,7 +236,101 @@ def fuse_weighted(face, speech, fatigue=None) -> Dict:
 
     return _result(
         dominant, fusion_conf, fatigue_level, face_conf, speech_conf, fatigue_conf,
-        "weighted", face_emo, speech_emo
+        mode_str, face_emo, speech_emo
+    )
+
+
+# Offline-learned per-class reliability priors for the bayes arm (arm F).
+# Small committed artifact (like models/face_landmarker.task), NOT runtime output.
+# Regenerate: python scripts/fusion_bayes.py --data <d> --cache <c> --export models/fusion_bayes_priors.json
+_BAYES_PRIORS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "models", "fusion_bayes_priors.json")
+_BAYES_PRIORS: Optional[Dict] = None
+_BAYES_LOAD_TRIED = False
+
+
+def _load_bayes_priors() -> Optional[Dict]:
+    """Lazy-load the Bayesian priors JSON once; return None if unavailable."""
+    global _BAYES_PRIORS, _BAYES_LOAD_TRIED
+    if _BAYES_LOAD_TRIED:
+        return _BAYES_PRIORS
+    _BAYES_LOAD_TRIED = True
+    try:
+        with open(_BAYES_PRIORS_PATH, encoding="utf-8") as f:
+            _BAYES_PRIORS = json.load(f)
+    except Exception:
+        _BAYES_PRIORS = None
+    return _BAYES_PRIORS
+
+
+def fuse_bayes(face, speech, fatigue=None) -> Dict:
+    """
+    Bayesian per-class-reliability fusion (arm F).
+
+    Combines the two modalities by their *offline-learned per-class reliability*
+    (confusion likelihoods) rather than self-reported confidence:
+
+        P(true=c | face=f, speech=s) ∝ P(c) · P(face=f | true=c) · P(speech=s | true=c)
+
+    The priors P(c) and likelihoods P(pred|true) are learned offline on a labeled
+    validation set (fusion_bayes_priors.json). A missing modality (confidence 0) simply
+    drops its likelihood term. Output emotions are restricted to the priors' training
+    classes. If the priors file is absent, this falls back to weighted fusion so the app
+    never breaks.
+    """
+    priors = _load_bayes_priors()
+    face_emo, face_conf, speech_emo, speech_conf, fatigue_level, fatigue_conf = _read_inputs(
+        face, speech, fatigue
+    )
+
+    if priors is None:
+        # Graceful fallback: behave like weighted, but tag the mode so logs are honest.
+        res = fuse_weighted(face, speech, fatigue, use_reliability=False)
+        res["fusion_mode"] = "bayes(priors-missing->weighted)"
+        return res
+
+    if face_conf == 0.0 and speech_conf == 0.0:
+        return _result(
+            MOCK_EMOTION, 0.0, fatigue_level, face_conf, speech_conf, fatigue_conf,
+            "bayes", face_emo, speech_emo
+        )
+
+    classes = priors["classes"]
+    face_lik = priors["face_lik"]
+    speech_lik = priors["speech_lik"]
+    prior = priors["prior"]
+
+    log_scores = {}
+    for c in classes:
+        s = math.log(prior[c])
+        if face_conf > 0.0:  # only count a modality that actually reported
+            lc = face_lik[c]
+            s += math.log(lc.get(face_emo, lc.get("__floor__", 1e-6)))
+        if speech_conf > 0.0:
+            lc = speech_lik[c]
+            s += math.log(lc.get(speech_emo, lc.get("__floor__", 1e-6)))
+        log_scores[c] = s
+
+    # argmax with a deterministic tie-break consistent with the other arms.
+    max_log = max(log_scores.values())
+    candidates = [c for c, v in log_scores.items() if abs(v - max_log) < 1e-12]
+    if len(candidates) == 1:
+        dominant = candidates[0]
+    elif speech_emo in candidates:
+        dominant = speech_emo
+    elif face_emo in candidates:
+        dominant = face_emo
+    else:
+        dominant = sorted(candidates)[0]
+
+    # Confidence = softmax posterior of the winning class (numerically stable).
+    exps = {c: math.exp(v - max_log) for c, v in log_scores.items()}
+    total = sum(exps.values()) or 1.0
+    fusion_conf = exps[dominant] / total
+
+    return _result(
+        dominant, fusion_conf, fatigue_level, face_conf, speech_conf, fatigue_conf,
+        "bayes", face_emo, speech_emo
     )
 
 
@@ -227,7 +342,8 @@ def fuse(face, speech, fatigue=None, mode: Optional[str] = None) -> Dict:
         face:    {"emotion": str, "confidence": float, ...}
         speech:  {"emotion": str, "confidence": float, "reasoning": str, ...}
         fatigue: {"fatigue_level": str, "confidence": float, ...}
-        mode:    "weighted" or "naive". If omitted, uses env FUSION_MODE or weighted.
+        mode:    "weighted" (default) / "naive" / "weighted_cam" / "bayes".
+                 If omitted, uses env FUSION_MODE or weighted.
 
     Returns:
         unified state JSON.
@@ -236,8 +352,13 @@ def fuse(face, speech, fatigue=None, mode: Optional[str] = None) -> Dict:
     if mode in {"naive", "simple", "vote", "voting", "equal"}:
         return fuse_naive(face, speech, fatigue)
     if mode in {"weighted", "confidence", "confidence_weighted", "cw"}:
-        return fuse_weighted(face, speech, fatigue)
-    raise ValueError(f"Unknown fusion mode: {mode}. Use 'naive' or 'weighted'.")
+        return fuse_weighted(face, speech, fatigue, use_reliability=False)
+    if mode in {"weighted_cam", "cam", "cam_gated", "e"}:
+        return fuse_weighted(face, speech, fatigue, use_reliability=True)
+    if mode in {"bayes", "bayesian", "per_class", "perclass", "f"}:
+        return fuse_bayes(face, speech, fatigue)
+    raise ValueError(
+        f"Unknown fusion mode: {mode}. Use 'naive' / 'weighted' / 'weighted_cam' / 'bayes'.")
 
 
 if __name__ == "__main__":

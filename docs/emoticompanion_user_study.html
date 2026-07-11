@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EmotiCompanion · User Study Kit</title>
+<style>
+  :root{
+    --bg:#f7f8fb; --panel:#ffffff; --text:#1f2937; --muted:#6b7280;
+    --line:#e5e7eb; --accent:#5b6ee1; --accent-2:#eef0ff;
+    --ok:#11875d; --warn:#b7791f; --danger:#b42318; --shadow:0 10px 30px rgba(31,41,55,.08);
+    --radius:18px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",Arial,sans-serif}
+  button,input,select,textarea{font:inherit}
+  .app{min-height:100vh;display:grid;grid-template-columns:280px 1fr}
+  aside{position:sticky;top:0;height:100vh;padding:24px 18px;border-right:1px solid var(--line);background:rgba(255,255,255,.88);backdrop-filter:blur(12px);overflow:auto}
+  main{padding:30px 34px 60px;max-width:1200px;width:100%;margin:0 auto}
+  .brand{display:flex;gap:12px;align-items:center;margin-bottom:20px}
+  .logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#6b7cff,#a07cff);display:grid;place-items:center;color:white;font-size:22px;box-shadow:var(--shadow)}
+  .brand h1{font-size:17px;margin:0}.brand p{font-size:12px;color:var(--muted);margin:2px 0 0}
+  .progress-wrap{margin:18px 0 22px}.progress-label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:7px}
+  .progress{height:8px;border-radius:999px;background:#eceff6;overflow:hidden}.progress>div{height:100%;width:0;background:linear-gradient(90deg,#5b6ee1,#8b5cf6);transition:.25s}
+  .step-nav{display:grid;gap:7px}.step-nav button{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:12px;color:var(--muted);cursor:pointer}
+  .step-nav button:hover{background:#f2f4fb}.step-nav button.active{background:var(--accent-2);color:var(--accent);font-weight:700}
+  .aside-actions{display:grid;gap:8px;margin-top:22px}
+  .btn{border:1px solid var(--line);background:white;color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+  .btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(31,41,55,.08)}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.soft{background:var(--accent-2);color:var(--accent);border-color:transparent}
+  .btn.danger{color:var(--danger);background:#fff7f6}
+  .btn.small{padding:7px 10px;font-size:13px;border-radius:10px}
+  .topbar{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:22px}
+  .topbar h2{margin:0 0 5px;font-size:28px;line-height:1.2}.topbar p{margin:0;color:var(--muted)}
+  .status{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .chip{padding:7px 10px;border-radius:999px;background:white;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+  .chip.ok{color:var(--ok);background:#f0fbf7;border-color:#ccefe1}
+  .step{display:none}.step.active{display:block;animation:fade .2s ease}
+  @keyframes fade{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-bottom:18px}
+  .card h3{margin:0 0 5px;font-size:18px}.card .sub{color:var(--muted);margin:0 0 18px}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .field{display:grid;gap:7px}.field.full{grid-column:1/-1}
+  label{font-weight:650;font-size:13px}.hint{font-size:12px;color:var(--muted);font-weight:400}
+  input[type=text],input[type=date],input[type=number],select,textarea{
+    width:100%;border:1px solid var(--line);background:#fff;padding:11px 12px;border-radius:12px;outline:none;transition:.15s
+  }
+  textarea{min-height:92px;resize:vertical}
+  input:focus,select:focus,textarea:focus{border-color:#a7b0ff;box-shadow:0 0 0 4px rgba(91,110,225,.1)}
+  .radio-row,.check-row{display:flex;flex-wrap:wrap;gap:9px}
+  .option{display:flex;align-items:center;gap:7px;padding:9px 11px;border:1px solid var(--line);border-radius:12px;background:white;cursor:pointer;font-weight:500}
+  .option:has(input:checked){border-color:#9da7ff;background:var(--accent-2);color:var(--accent)}
+  input[type=radio],input[type=checkbox]{accent-color:var(--accent)}
+  .scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .scale .option{justify-content:center;flex-direction:column;padding:10px 4px;font-size:12px;text-align:center}
+  .scale strong{font-size:16px}
+  .script{border-left:4px solid var(--accent);background:#f8f9ff;padding:14px 16px;border-radius:10px;color:#3e4a68}
+  .notice{padding:13px 15px;border:1px solid #d9e3ff;background:#f7f9ff;border-radius:12px;color:#43506e;margin-bottom:16px}
+  .notice.warn{border-color:#f2dfb2;background:#fffaf0;color:#775c1d}
+  .notice.ok{border-color:#cfeade;background:#f4fbf7;color:#27674f}
+  .section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .nav-actions{display:flex;justify-content:space-between;gap:12px;margin-top:18px}
+  .hidden{display:none!important}
+  .participant-mode .researcher-only{display:none!important}
+  .participant-mode .participant-only{display:block}
+  .participant-only{display:none}
+  .summary{white-space:pre-wrap;background:#f8f9fb;border:1px solid var(--line);border-radius:12px;padding:16px;max-height:420px;overflow:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:650}
+  .footer-note{font-size:12px;color:var(--muted);margin-top:12px}
+  dialog{border:0;border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.25);padding:0;max-width:720px;width:calc(100% - 30px)}
+  dialog::backdrop{background:rgba(24,30,50,.45);backdrop-filter:blur(3px)}
+  .dialog-body{padding:24px}.dialog-head{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:18px 24px}
+  .dialog-head h3{margin:0}.icon-btn{border:0;background:#f3f4f6;border-radius:10px;width:34px;height:34px;cursor:pointer}
+  .range-wrap{display:grid;grid-template-columns:1fr 52px;gap:10px;align-items:center}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .score-pill{border:1px solid var(--line);padding:8px;border-radius:10px;text-align:center;background:#fafafa;font-weight:700}
+  .invalid{outline:2px solid #ef4444!important;outline-offset:2px}
+  @media(max-width:900px){
+    .app{grid-template-columns:1fr} aside{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    .step-nav{grid-template-columns:repeat(3,1fr)} .step-nav button{text-align:center;font-size:12px}
+    main{padding:22px 16px 50px}.topbar{flex-direction:column}.status{justify-content:flex-start}
+    .grid,.grid.three{grid-template-columns:1fr}.scale{grid-template-columns:repeat(5,minmax(48px,1fr))}
+  }
+  @media print{
+    aside,.topbar,.nav-actions,.no-print{display:none!important}
+    main{padding:0;max-width:none}.step{display:none!important}.step.print-target{display:block!important}
+    .card{box-shadow:none;border:1px solid #bbb}.app{display:block}.researcher-only{display:block!important}
+    body{background:white;font-size:12pt}
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside>
+    <div class="brand">
+      <div class="logo">♫</div>
+      <div><h1>EmotiCompanion</h1><p>User Study Kit · v1.0</p></div>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label"><span>实验进度</span><span id="progressText">1 / 10</span></div>
+      <div class="progress"><div id="progressBar"></div></div>
+    </div>
+    <div class="step-nav" id="stepNav"></div>
+    <div class="aside-actions">
+      <button class="btn soft" id="toggleMode">切换为参与者视图</button>
+      <button class="btn" id="openScript">查看统一主试脚本</button>
+      <button class="btn" id="saveDraft">保存当前参与者</button>
+      <button class="btn" id="openSessions">参与者记录管理</button>
+    </div>
+    <p class="footer-note">所有信息仅保存在当前浏览器本地，不会上传网络。正式收集后请导出 CSV/JSON 并备份。</p>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div><h2 id="stepTitle">研究设置</h2><p id="stepSubtitle">先完成研究者端配置，再将页面交给参与者。</p></div>
+      <div class="status">
+        <span class="chip" id="modeChip">研究者视图</span>
+        <span class="chip" id="pidChip">PID 未填写</span>
+        <span class="chip ok" id="autosaveChip">已自动保存</span>
+      </div>
+    </div>
+
+    <form id="studyForm" novalidate>
+      <!-- 0 -->
+      <section class="step active" data-title="研究设置" data-subtitle="先完成研究者端配置，再将页面交给参与者。">
+        <div class="card researcher-only">
+          <div class="section-title"><div><h3>研究者设置</h3><p class="sub">此区域在“参与者视图”中会隐藏。</p></div><span class="chip">Researcher only</span></div>
+          <div class="grid three">
+            <div class="field"><label>参与者编号 <span class="hint">pid</span></label><input required name="pid" id="pid" type="text" placeholder="P01" /></div>
+            <div class="field"><label>实验日期</label><input required name="date" id="date" type="date" /></div>
+            <div class="field"><label>研究版本</label><input name="study_version" type="text" value="v1.0" /></div>
+            <div class="field"><label>协议</label><select required name="protocol" id="protocol"><option value="">请选择</option><option value="induced">情绪诱导 induced</option><option value="natural">自然状态 natural</option></select></div>
+            <div class="field"><label>目标状态 <span class="hint">assigned_state</span></label><select name="assigned_state"><option value="">未分配</option><option>happy</option><option>sad</option><option>anxious</option><option>tired</option><option>neutral</option><option>other</option></select></div>
+            <div class="field"><label>A/B 条件顺序</label><select required name="condition_order"><option value="">请选择</option><option value="A=TOM;B=STD">A=ToM，B=Standard</option><option value="A=STD;B=TOM">A=Standard，B=ToM</option></select></div>
+            <div class="field"><label>MusicGen seed</label><input name="seed" type="number" placeholder="1001" /></div>
+            <div class="field"><label>诱导材料编号</label><input name="induction_clip" type="text" placeholder="HAPPY-01 / SAD-01" /></div>
+            <div class="field"><label>主试编号</label><input name="researcher_id" type="text" placeholder="M1 / M2 / M3 / M4" /></div>
+            <div class="field full"><label>研究者备注</label><textarea name="researcher_notes" placeholder="设备、环境、异常情况等"></textarea></div>
+          </div>
+          <div class="notice warn">正式实验前：请预热模型、固定耳机与音量、切到 Manual 模式，并确认所有模块均为真实实现而非 mock。</div>
+        </div>
+
+        <div class="card">
+          <h3>实验材料清单</h3>
+          <p class="sub">建议每场实验开始前逐项确认。</p>
+          <div class="check-row">
+            <label class="option"><input name="check_consent" type="checkbox">知情同意</label>
+            <label class="option"><input name="check_headphones" type="checkbox">耳机/音量固定</label>
+            <label class="option"><input name="check_warmup" type="checkbox">模型已预热</label>
+            <label class="option"><input name="check_manual" type="checkbox">Manual 模式</label>
+            <label class="option"><input name="check_real_modules" type="checkbox">真实模块已加载</label>
+            <label class="option"><input name="check_privacy" type="checkbox">媒体保存设置确认</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1 -->
+      <section class="step" data-title="知情同意" data-subtitle="说明研究内容、隐私与退出权利。">
+        <div class="card" id="consentCard">
+          <h3>EmotiCompanion 用户研究 · 知情同意</h3>
+          <p class="sub">AIAA 3800 课程项目 · 预计 12–15 分钟</p>
+          <div class="notice">
+            本研究评估一个多模态情绪音乐陪伴系统。你将对摄像头拍摄一张图像、录制一句当下感受，系统会分析情绪与疲劳并生成音乐。原始摄像头画面和录音默认不保存，仅记录匿名编号、系统标签、评分与文字反馈。你可随时退出，并要求删除本次数据。
+          </div>
+          <div class="grid">
+            <div class="field"><label>年龄段</label><select required name="age_band"><option value="">请选择</option><option>18–22</option><option>23–26</option><option>27+</option><option>不愿透露</option></select></div>
+            <div class="field"><label>性别（可选）</label><select name="gender"><option value="">未填写</option><option>男</option><option>女</option><option>其他</option><option>不愿透露</option></select></div>
+            <div class="field"><label>听力是否正常</label><select required name="hearing_ok"><option value="">请选择</option><option value="Y">是</option><option value="N">否</option><option value="unsure">不确定</option></select></div>
+            <div class="field"><label>衍生面部图保存授权</label><select required name="media_consent"><option value="">请选择</option><option value="N">不同意保存</option><option value="Y">同意保存 GradCAM / 疲劳标注图</option></select></div>
+            <div class="field full">
+              <label class="option"><input required name="consent_participate" type="checkbox" value="Y">我已阅读并理解以上内容，自愿参加，并知道可随时退出。</label>
+            </div>
+            <div class="field"><label>电子签名</label><input required name="signature" type="text" placeholder="请输入姓名或签名缩写" /></div>
+            <div class="field"><label>签署日期</label><input required name="consent_date" type="date" /></div>
+          </div>
+          <div class="nav-actions no-print">
+            <button type="button" class="btn" onclick="printSection(1)">打印/保存本页同意书</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="step" data-title="基线状态" data-subtitle="在看到系统判断前，先记录参与者的真实感受与音乐需求。">
+        <div class="card">
+          <div class="script"><strong>主试：</strong>“请先根据你此刻真实的感受回答。这里没有正确答案，系统的判断暂时不会展示给你。”</div>
+        </div>
+        <div class="card">
+          <h3>当前状态自评</h3><p class="sub">Pre-study baseline</p>
+          <div class="grid">
+            <div class="field"><label>当前主要情绪</label><select required name="self_emotion_pre"><option value="">请选择</option><option>happy</option><option>sad</option><option>angry</option><option>fear/anxious</option><option>neutral</option><option>surprise</option><option>disgust</option><option>other</option></select></div>
+            <div class="field"><label>其他情绪描述</label><input name="self_emotion_pre_text" type="text" placeholder="可自由描述" /></div>
+            <div class="field"><label>情绪强度 1–5</label><div class="range-wrap"><input name="intensity_pre" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>愉悦度 Valence 1–5</label><div class="range-wrap"><input name="valence_pre" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>唤醒度 Arousal 1–5</label><div class="range-wrap"><input name="arousal_pre" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>疲劳程度 1–5</label><div class="range-wrap"><input name="fatigue_pre" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field full"><label>你希望音乐现在帮助你做什么？</label>
+              <div class="radio-row">
+                <label class="option"><input required type="radio" name="desired_goal" value="calm">平静下来</label>
+                <label class="option"><input type="radio" name="desired_goal" value="energize">振奋起来</label>
+                <label class="option"><input type="radio" name="desired_goal" value="maintain">维持当前状态</label>
+                <label class="option"><input type="radio" name="desired_goal" value="focus">集中注意</label>
+                <label class="option"><input type="radio" name="desired_goal" value="other">其他</label>
+              </div>
+            </div>
+            <div class="field full"><label>补充说明</label><textarea name="desired_goal_text" placeholder="例如：我不是想完全放松，而是希望保持清醒但不要那么紧张。"></textarea></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 -->
+      <section class="step" data-title="情绪诱导检查" data-subtitle="仅在 induced 协议中使用；自然状态可直接跳过。">
+        <div class="card">
+          <div class="script"><strong>主试：</strong>“刚才的短片是否让你进入了目标状态？请根据真实感受回答。”</div>
+        </div>
+        <div class="card">
+          <h3>Manipulation check</h3><p class="sub">如果使用 natural 协议，可选择“不适用”。</p>
+          <div class="grid">
+            <div class="field"><label>诱导是否成功</label><select required name="induction_success"><option value="">请选择</option><option value="yes">是</option><option value="partial">部分成功</option><option value="no">否</option><option value="na">不适用（natural）</option></select></div>
+            <div class="field"><label>诱导强度 1–5</label><div class="range-wrap"><input name="induction_strength" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>诱导后主要情绪</label><select name="self_emotion_post_induction"><option value="">未填写</option><option>happy</option><option>sad</option><option>angry</option><option>fear/anxious</option><option>neutral</option><option>surprise</option><option>disgust</option><option>other</option></select></div>
+            <div class="field"><label>诱导后情绪强度 1–5</label><div class="range-wrap"><input name="intensity_post_induction" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>诱导后 Valence 1–5</label><div class="range-wrap"><input name="valence_post_induction" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>诱导后 Arousal 1–5</label><div class="range-wrap"><input name="arousal_post_induction" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 -->
+      <section class="step" data-title="系统感知" data-subtitle="运行一次感知与融合，记录系统输出，再询问主观匹配度。">
+        <div class="card">
+          <div class="script"><strong>主试：</strong>“现在请拍一张照片，并录一句你此刻真实的想法。系统会分析你的状态，但原始图像和录音默认不会保存。”</div>
+        </div>
+        <div class="card researcher-only">
+          <div class="section-title"><div><h3>系统输出记录</h3><p class="sub">建议直接从界面或 session log 填写。</p></div><span class="chip">Researcher only</span></div>
+          <div class="grid three">
+            <div class="field"><label>Face emotion</label><input name="face_emotion" type="text"></div>
+            <div class="field"><label>Face confidence</label><input name="face_conf" type="number" min="0" max="1" step="0.0001"></div>
+            <div class="field"><label>Face raw label</label><input name="face_raw" type="text"></div>
+            <div class="field"><label>Speech emotion</label><input name="speech_emotion" type="text"></div>
+            <div class="field"><label>Speech confidence</label><input name="speech_conf" type="number" min="0" max="1" step="0.0001"></div>
+            <div class="field"><label>Speech reasoning</label><input name="speech_reasoning" type="text"></div>
+            <div class="field"><label>System emotion</label><input required name="sys_emotion" type="text"></div>
+            <div class="field"><label>Fusion confidence</label><input name="fusion_conf" type="number" min="0" max="1" step="0.0001"></div>
+            <div class="field"><label>System fatigue</label><select required name="sys_fatigue"><option value="">请选择</option><option>low</option><option>medium</option><option>high</option></select></div>
+            <div class="field"><label>Fatigue confidence</label><input name="fatigue_conf" type="number" min="0" max="1" step="0.0001"></div>
+            <div class="field"><label>感知耗时（秒）</label><input name="perception_latency_sec" type="number" min="0" step="0.1"></div>
+            <div class="field"><label>本次输入文本摘要</label><input name="utterance_summary" type="text"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Q1 · 感知匹配度</h3>
+          <p class="sub">“系统感知到的情绪，和你当时实际感受一致吗？”</p>
+          <div class="scale">
+            <label class="option"><input required type="radio" name="Q1_perc_match" value="1"><strong>1</strong><span>完全不一致</span></label>
+            <label class="option"><input type="radio" name="Q1_perc_match" value="2"><strong>2</strong><span>较不一致</span></label>
+            <label class="option"><input type="radio" name="Q1_perc_match" value="3"><strong>3</strong><span>一般</span></label>
+            <label class="option"><input type="radio" name="Q1_perc_match" value="4"><strong>4</strong><span>较一致</span></label>
+            <label class="option"><input type="radio" name="Q1_perc_match" value="5"><strong>5</strong><span>完全一致</span></label>
+          </div>
+          <div class="field" style="margin-top:14px"><label>为什么这样评分？</label><textarea name="Q1_reason"></textarea></div>
+        </div>
+      </section>
+
+      <!-- 5 -->
+      <section class="step" data-title="音乐 A" data-subtitle="参与者只看到 A/B，不知道背后的推理条件。">
+        <div class="card">
+          <div class="script"><strong>主试：</strong>“下面请听音乐 A。听完后，请分别评价它是否反映你的状态、是否符合你的需求，以及音乐本身的质量。”</div>
+        </div>
+        <div class="card researcher-only">
+          <h3>音乐 A · 系统记录</h3>
+          <div class="grid">
+            <div class="field"><label>A condition</label><input name="A_condition" type="text" placeholder="由研究者填写 ToM / Standard"></div>
+            <div class="field"><label>A latency（秒）</label><input name="A_latency_sec" type="number" min="0" step="0.1"></div>
+            <div class="field full"><label>A inferred need</label><textarea name="A_need"></textarea></div>
+            <div class="field full"><label>A music spec</label><textarea name="A_music_spec"></textarea></div>
+          </div>
+        </div>
+        <div class="card"><h3>音乐 A 评分</h3><div id="ratingA"></div></div>
+      </section>
+
+      <!-- 6 -->
+      <section class="step" data-title="音乐 B" data-subtitle="使用与音乐 A 相同的融合状态，只改变推理条件。">
+        <div class="card">
+          <div class="script"><strong>主试：</strong>“现在请听音乐 B。请继续独立评分，不需要刻意与上一段保持一致。”</div>
+        </div>
+        <div class="card researcher-only">
+          <h3>音乐 B · 系统记录</h3>
+          <div class="grid">
+            <div class="field"><label>B condition</label><input name="B_condition" type="text" placeholder="由研究者填写 ToM / Standard"></div>
+            <div class="field"><label>B latency（秒）</label><input name="B_latency_sec" type="number" min="0" step="0.1"></div>
+            <div class="field full"><label>B inferred need</label><textarea name="B_need"></textarea></div>
+            <div class="field full"><label>B music spec</label><textarea name="B_music_spec"></textarea></div>
+          </div>
+        </div>
+        <div class="card"><h3>音乐 B 评分</h3><div id="ratingB"></div></div>
+      </section>
+
+      <!-- 7 -->
+      <section class="step" data-title="A/B 比较" data-subtitle="完成盲评后，再记录总体偏好与理由。">
+        <div class="card">
+          <h3>总体偏好</h3>
+          <p class="sub">“哪一段音乐更理解你当时需要什么？”</p>
+          <div class="radio-row">
+            <label class="option"><input required type="radio" name="Q3_pref_blind" value="A">音乐 A</label>
+            <label class="option"><input type="radio" name="Q3_pref_blind" value="B">音乐 B</label>
+            <label class="option"><input type="radio" name="Q3_pref_blind" value="tie">差不多</label>
+          </div>
+          <div class="grid" style="margin-top:16px">
+            <div class="field full"><label>Q3 · 为什么？</label><textarea required name="Q3_reason" placeholder="可从节奏、氛围、能量水平、乐器、舒适度等方面说明。"></textarea></div>
+            <div class="field full"><label>你主要根据哪些方面做出选择？</label>
+              <div class="check-row">
+                <label class="option"><input type="checkbox" name="Q3_basis_rhythm">节奏</label>
+                <label class="option"><input type="checkbox" name="Q3_basis_mood">情绪氛围</label>
+                <label class="option"><input type="checkbox" name="Q3_basis_energy">能量水平</label>
+                <label class="option"><input type="checkbox" name="Q3_basis_instrument">乐器/音色</label>
+                <label class="option"><input type="checkbox" name="Q3_basis_comfort">舒适度</label>
+                <label class="option"><input type="checkbox" name="Q3_basis_other">其他</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card researcher-only">
+          <h3>揭盲映射</h3>
+          <p class="sub">评分结束后再填写，避免影响参与者判断。</p>
+          <div class="grid">
+            <div class="field"><label>最终 Q3 preference</label><select name="Q3_pref"><option value="">请选择</option><option value="tom">ToM</option><option value="std">Standard</option><option value="tie">Tie</option></select></div>
+            <div class="field"><label>状态是否完全冻结一致</label><select name="state_frozen"><option value="">请选择</option><option value="Y">是</option><option value="N">否</option><option value="uncertain">不确定</option></select></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 -->
+      <section class="step" data-title="体验后问卷" data-subtitle="评估状态变化、隐私、等待时间与总体体验。">
+        <div class="card">
+          <h3>体验后的状态</h3><p class="sub">Post-study</p>
+          <div class="grid">
+            <div class="field"><label>体验后 Valence 1–5</label><div class="range-wrap"><input name="valence_post" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>体验后 Arousal 1–5</label><div class="range-wrap"><input name="arousal_post" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>体验后疲劳程度 1–5</label><div class="range-wrap"><input name="fatigue_post" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>Q4 · 是否更接近希望达到/维持的状态？</label><div class="range-wrap"><input name="Q4_goal_progress" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>一次性拍摄/录音的可接受度</label><div class="range-wrap"><input name="Q5_manual_privacy" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>持续 Auto 感知的可接受度</label><div class="range-wrap"><input name="Q5_auto_privacy" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>等待时间可接受度</label><div class="range-wrap"><input name="Q6_latency_acceptance" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+            <div class="field"><label>总体满意度</label><div class="range-wrap"><input name="overall_satisfaction" type="range" min="1" max="5" value="3" oninput="syncRange(this)"><span class="score-pill">3</span></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>简短访谈</h3>
+          <div class="grid">
+            <div class="field full"><label>最喜欢的一点</label><textarea required name="like_text"></textarea></div>
+            <div class="field full"><label>最想改进的一点</label><textarea required name="improve_text"></textarea></div>
+            <div class="field full"><label>对摄像头/麦克风持续感知的想法</label><textarea name="privacy_text"></textarea></div>
+            <div class="field full"><label>其他补充</label><textarea name="final_comments"></textarea></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 -->
+      <section class="step" data-title="检查与导出" data-subtitle="保存本次记录，导出单人或全部参与者数据。">
+        <div class="card">
+          <h3>会话摘要</h3><p class="sub">请研究者检查条件映射、缺失字段与异常情况。</p>
+          <div class="summary" id="reviewSummary">尚未生成摘要。</div>
+        </div>
+        <div class="card researcher-only">
+          <h3>导出</h3>
+          <div class="check-row">
+            <button type="button" class="btn primary" id="finalSave">保存/更新本参与者</button>
+            <button type="button" class="btn" id="exportOneCsv">导出本参与者 CSV</button>
+            <button type="button" class="btn" id="exportOneJson">导出本参与者 JSON</button>
+            <button type="button" class="btn soft" id="exportAllCsv">导出全部参与者 CSV</button>
+            <button type="button" class="btn" onclick="printSection(9)">打印完整记录</button>
+            <button type="button" class="btn danger" id="clearForm">清空当前表单</button>
+          </div>
+          <p class="footer-note">CSV 为“一位参与者一行”的宽表结构；全部参与者保存在本浏览器 localStorage 中。完成收集后请导出并离线备份。</p>
+        </div>
+      </section>
+
+      <div class="nav-actions no-print">
+        <button type="button" class="btn" id="prevBtn">← 上一步</button>
+        <button type="button" class="btn primary" id="nextBtn">下一步 →</button>
+      </div>
+    </form>
+  </main>
+</div>
+
+<dialog id="scriptDialog">
+  <div class="dialog-head"><h3>统一主试脚本</h3><button class="icon-btn" onclick="scriptDialog.close()">✕</button></div>
+  <div class="dialog-body">
+    <p><strong>开场：</strong>“谢谢参加。你会实际用一下这个音乐陪伴系统：对着摄像头说一句你现在真实的想法，它会判断你的情绪，并生成一段音乐。原始脸部图像和录音默认不会保存，只记录匿名标签和你的评分。你可以随时停止。”</p>
+    <p><strong>诱导：</strong>“先看一小段视频，帮助你进入一种状态。看完后请按真实感受回答，不需要迎合目标情绪。”</p>
+    <p><strong>系统输入：</strong>“现在请拍一张照片，再录一句你此刻真实的想法。我来运行系统。”</p>
+    <p><strong>音乐 A/B：</strong>“请独立评价每段音乐。两段只是不同系统版本，不代表一段一定更好。”</p>
+    <p><strong>收尾：</strong>“最后请评价隐私、等待时间，以及你最喜欢和最希望改进的部分。”</p>
+    <div class="notice warn">不要在 A/B 评分前告诉参与者哪一段是 ToM 或 Standard，也不要展示 CoT/need/music spec，以免产生期待偏差。</div>
+  </div>
+</dialog>
+
+<dialog id="sessionsDialog">
+  <div class="dialog-head"><h3>参与者记录管理</h3><button class="icon-btn" onclick="sessionsDialog.close()">✕</button></div>
+  <div class="dialog-body">
+    <div id="sessionsTable"></div>
+  </div>
+</dialog>
+
+<script>
+const steps=[...document.querySelectorAll('.step')];
+let currentStep=0;
+let participantMode=false;
+const form=document.getElementById('studyForm');
+const app=document.getElementById('app');
+const DRAFT_KEY='emoticompanion_current_draft_v1';
+const SESSIONS_KEY='emoticompanion_saved_sessions_v1';
+
+const ratingQuestions=[
+  ['mood_fit','这段音乐在多大程度上反映了你刚才的状态？','完全不反映','非常反映'],
+  ['need_fit','这段音乐在多大程度上符合你希望音乐带来的作用？','完全不符合','非常符合'],
+  ['helpfulness','你觉得这段音乐有助于你达到希望的状态吗？','完全没有帮助','非常有帮助'],
+  ['music_quality','不考虑情绪适配，这段音乐本身听起来好吗？','很差','很好'],
+  ['fatigue_fit','这段音乐贴合你此刻的精力/疲惫程度吗？','完全不贴合','非常贴合']
+];
+
+function ratingBlock(prefix){
+  return ratingQuestions.map(([key,q,left,right])=>`
+    <div class="field" style="margin-bottom:18px">
+      <label>${q}</label>
+      <div class="scale">
+        ${[1,2,3,4,5].map(n=>`<label class="option"><input ${n===1?'required':''} type="radio" name="${prefix}_${key}" value="${n}"><strong>${n}</strong><span>${n===1?left:n===5?right:' '}</span></label>`).join('')}
+      </div>
+    </div>`).join('');
+}
+document.getElementById('ratingA').innerHTML=ratingBlock('A');
+document.getElementById('ratingB').innerHTML=ratingBlock('B');
+
+function buildNav(){
+  const names=['设置','同意','基线','诱导','感知','音乐 A','音乐 B','比较','体验后','导出'];
+  const nav=document.getElementById('stepNav');
+  nav.innerHTML=names.map((n,i)=>`<button type="button" data-i="${i}">${i+1}. ${n}</button>`).join('');
+  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>goTo(+b.dataset.i,false));
+}
+buildNav();
+
+function goTo(i,validate=true){
+  if(validate && i>currentStep && !validateStep(currentStep)) return;
+  currentStep=Math.max(0,Math.min(steps.length-1,i));
+  steps.forEach((s,j)=>s.classList.toggle('active',j===currentStep));
+  document.querySelectorAll('.step-nav button').forEach((b,j)=>b.classList.toggle('active',j===currentStep));
+  document.getElementById('stepTitle').textContent=steps[currentStep].dataset.title;
+  document.getElementById('stepSubtitle').textContent=steps[currentStep].dataset.subtitle;
+  document.getElementById('progressText').textContent=`${currentStep+1} / ${steps.length}`;
+  document.getElementById('progressBar').style.width=`${(currentStep+1)/steps.length*100}%`;
+  document.getElementById('prevBtn').style.visibility=currentStep===0?'hidden':'visible';
+  document.getElementById('nextBtn').textContent=currentStep===steps.length-1?'回到开始':'下一步 →';
+  if(currentStep===steps.length-1) updateSummary();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.getElementById('prevBtn').onclick=()=>goTo(currentStep-1,false);
+document.getElementById('nextBtn').onclick=()=>currentStep===steps.length-1?goTo(0,false):goTo(currentStep+1,true);
+
+function validateStep(i){
+  const section=steps[i];
+  const required=[...section.querySelectorAll('[required]')].filter(el=>{
+    const hidden=el.closest('.hidden') || (participantMode && el.closest('.researcher-only'));
+    return !hidden;
+  });
+  let first=null;
+  required.forEach(el=>{
+    let ok=true;
+    if(el.type==='radio') ok=!!section.querySelector(`[name="${el.name}"]:checked`);
+    else if(el.type==='checkbox') ok=el.checked;
+    else ok=String(el.value||'').trim()!=='';
+    el.classList.toggle('invalid',!ok);
+    if(!ok && !first) first=el;
+  });
+  if(first){ first.scrollIntoView({behavior:'smooth',block:'center'}); setTimeout(()=>first.focus(),350); return false; }
+  return true;
+}
+
+function getFormData(){
+  const obj={};
+  const fd=new FormData(form);
+  for(const [k,v] of fd.entries()){
+    if(obj[k]!==undefined) obj[k]=Array.isArray(obj[k])?[...obj[k],v]:[obj[k],v];
+    else obj[k]=v;
+  }
+  form.querySelectorAll('input[type=checkbox][name]').forEach(el=>{ if(obj[el.name]===undefined) obj[el.name]='N'; else if(obj[el.name]===el.value || obj[el.name]==='on') obj[el.name]='Y'; });
+  obj._saved_at=new Date().toISOString();
+  return obj;
+}
+
+function setFormData(obj){
+  form.reset();
+  Object.entries(obj||{}).forEach(([name,val])=>{
+    const els=[...form.querySelectorAll(`[name="${CSS.escape(name)}"]`)];
+    els.forEach(el=>{
+      if(el.type==='radio') el.checked=String(el.value)===String(val);
+      else if(el.type==='checkbox') el.checked=(val==='Y'||val===true||val==='on'||val===el.value);
+      else el.value=Array.isArray(val)?val[0]:val;
+      if(el.type==='range') syncRange(el);
+    });
+  });
+  updateChips(); updateSummary(); autosave();
+}
+
+function autosave(){
+  localStorage.setItem(DRAFT_KEY,JSON.stringify(getFormData()));
+  const chip=document.getElementById('autosaveChip');
+  chip.textContent='已自动保存'; chip.classList.add('ok');
+}
+let saveTimer;
+form.addEventListener('input',()=>{ updateChips(); document.getElementById('autosaveChip').textContent='保存中…'; clearTimeout(saveTimer); saveTimer=setTimeout(autosave,250); });
+form.addEventListener('change',()=>{ updateChips(); clearTimeout(saveTimer); saveTimer=setTimeout(autosave,150); });
+
+function updateChips(){
+  const pid=form.elements.pid?.value?.trim();
+  document.getElementById('pidChip').textContent=pid?`PID ${pid}`:'PID 未填写';
+}
+function syncRange(el){ const pill=el.parentElement.querySelector('.score-pill'); if(pill) pill.textContent=el.value; }
+
+function saveSession(){
+  const data=getFormData(), pid=(data.pid||'').trim();
+  if(!pid){ alert('请先填写参与者编号 PID。'); goTo(0,false); return false; }
+  const arr=JSON.parse(localStorage.getItem(SESSIONS_KEY)||'[]');
+  const idx=arr.findIndex(x=>x.pid===pid);
+  if(idx>=0) arr[idx]=data; else arr.push(data);
+  localStorage.setItem(SESSIONS_KEY,JSON.stringify(arr));
+  alert(`已保存 ${pid}。`);
+  renderSessions();
+  return true;
+}
+document.getElementById('saveDraft').onclick=saveSession;
+document.getElementById('finalSave').onclick=saveSession;
+
+function renderSessions(){
+  const arr=JSON.parse(localStorage.getItem(SESSIONS_KEY)||'[]');
+  const wrap=document.getElementById('sessionsTable');
+  if(!arr.length){ wrap.innerHTML='<div class="notice">暂无已保存参与者。</div>'; return; }
+  wrap.innerHTML=`<table><thead><tr><th>PID</th><th>日期</th><th>协议</th><th>顺序</th><th>操作</th></tr></thead><tbody>${
+    arr.map((x,i)=>`<tr><td><strong>${escapeHtml(x.pid||'')}</strong></td><td>${escapeHtml(x.date||'')}</td><td>${escapeHtml(x.protocol||'')}</td><td>${escapeHtml(x.condition_order||'')}</td><td>
+      <button class="btn small" onclick="loadSession(${i})">载入</button>
+      <button class="btn small danger" onclick="deleteSession(${i})">删除</button>
+    </td></tr>`).join('')
+  }</tbody></table>`;
+}
+window.loadSession=i=>{
+  const arr=JSON.parse(localStorage.getItem(SESSIONS_KEY)||'[]');
+  setFormData(arr[i]); sessionsDialog.close(); goTo(0,false);
+};
+window.deleteSession=i=>{
+  const arr=JSON.parse(localStorage.getItem(SESSIONS_KEY)||'[]');
+  if(!confirm(`删除 ${arr[i]?.pid||'该记录'}？`)) return;
+  arr.splice(i,1); localStorage.setItem(SESSIONS_KEY,JSON.stringify(arr)); renderSessions();
+};
+
+function csvEscape(v){
+  if(v===null||v===undefined) return '';
+  const s=Array.isArray(v)?v.join('|'):String(v);
+  return /[",\n]/.test(s)?`"${s.replaceAll('"','""')}"`:s;
+}
+function download(content,filename,type){
+  const blob=new Blob([content],{type}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+function exportCsv(rows,filename){
+  if(!rows.length){alert('没有可导出的记录。');return;}
+  const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))].filter(k=>!k.startsWith('_'));
+  const csv='\uFEFF'+[keys.join(','),...rows.map(r=>keys.map(k=>csvEscape(r[k])).join(','))].join('\n');
+  download(csv,filename,'text/csv;charset=utf-8');
+}
+document.getElementById('exportOneCsv').onclick=()=>{const d=getFormData(); exportCsv([d],`${d.pid||'participant'}_user_study.csv`)};
+document.getElementById('exportOneJson').onclick=()=>{const d=getFormData(); download(JSON.stringify(d,null,2),`${d.pid||'participant'}_user_study.json`,'application/json')};
+document.getElementById('exportAllCsv').onclick=()=>{
+  const arr=JSON.parse(localStorage.getItem(SESSIONS_KEY)||'[]');
+  exportCsv(arr,'emoticompanion_user_study_all.csv');
+};
+
+function updateSummary(){
+  const d=getFormData();
+  const mapPref=d.Q3_pref||d.Q3_pref_blind||'未填写';
+  const lines=[
+    `PID: ${d.pid||'未填写'}    日期: ${d.date||'未填写'}    协议: ${d.protocol||'未填写'}`,
+    `目标状态: ${d.assigned_state||'未填写'}    顺序: ${d.condition_order||'未填写'}    seed: ${d.seed||'未填写'}`,
+    ``,
+    `基线情绪: ${d.self_emotion_pre||'未填写'}    目标: ${d.desired_goal||'未填写'}`,
+    `系统情绪: ${d.sys_emotion||'未填写'}    系统疲劳: ${d.sys_fatigue||'未填写'}    Q1: ${d.Q1_perc_match||'未填写'}`,
+    ``,
+    `Music A (${d.A_condition||'未揭盲'}): mood=${d.A_mood_fit||'-'}, need=${d.A_need_fit||'-'}, help=${d.A_helpfulness||'-'}, quality=${d.A_music_quality||'-'}`,
+    `Music B (${d.B_condition||'未揭盲'}): mood=${d.B_mood_fit||'-'}, need=${d.B_need_fit||'-'}, help=${d.B_helpfulness||'-'}, quality=${d.B_music_quality||'-'}`,
+    `总体偏好: ${mapPref}`,
+    ``,
+    `Goal progress: ${d.Q4_goal_progress||'-'}    Manual privacy: ${d.Q5_manual_privacy||'-'}    Auto privacy: ${d.Q5_auto_privacy||'-'}`,
+    `最喜欢: ${d.like_text||'未填写'}`,
+    `最想改进: ${d.improve_text||'未填写'}`
+  ];
+  document.getElementById('reviewSummary').textContent=lines.join('\n');
+}
+
+document.getElementById('toggleMode').onclick=()=>{
+  participantMode=!participantMode;
+  app.classList.toggle('participant-mode',participantMode);
+  document.getElementById('toggleMode').textContent=participantMode?'切换为研究者视图':'切换为参与者视图';
+  document.getElementById('modeChip').textContent=participantMode?'参与者视图':'研究者视图';
+  document.getElementById('modeChip').classList.toggle('ok',participantMode);
+};
+document.getElementById('openScript').onclick=()=>scriptDialog.showModal();
+document.getElementById('openSessions').onclick=()=>{renderSessions();sessionsDialog.showModal();};
+document.getElementById('clearForm').onclick=()=>{
+  if(!confirm('清空当前表单？已保存的参与者记录不会被删除。')) return;
+  form.reset(); document.querySelectorAll('input[type=range]').forEach(syncRange); localStorage.removeItem(DRAFT_KEY); updateChips(); updateSummary(); goTo(0,false);
+};
+
+function printSection(i){
+  steps.forEach((s,j)=>s.classList.toggle('print-target',j===i));
+  setTimeout(()=>window.print(),50);
+}
+window.printSection=printSection;
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+
+(function init(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('date').value=today;
+  form.elements.consent_date.value=today;
+  const draft=localStorage.getItem(DRAFT_KEY);
+  if(draft){ try{setFormData(JSON.parse(draft));}catch(e){} }
+  document.querySelectorAll('input[type=range]').forEach(syncRange);
+  updateChips(); goTo(0,false);
+})();
+</script>
+</body>
+</html>

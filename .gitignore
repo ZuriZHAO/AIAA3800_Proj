@@ -2,6 +2,9 @@
 data/
 *.mp4
 
+# 实验产物（消融指标、混淆矩阵、GradCAM/疲劳可视化图、缓存）
+results/
+
 # M3 生成的音频输出（music_gen.py → outputs/）
 outputs/
 *.wav
