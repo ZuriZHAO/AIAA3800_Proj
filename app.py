@@ -43,7 +43,7 @@ import wave
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # 让本地回环地址绕过系统/环境代理。否则开了科学上网（系统代理指向
 # 127.0.0.1:xxxx）时，gradio 启动后自检 http://127.0.0.1 的请求会被代理
@@ -196,6 +196,7 @@ def _log_session(state, need, session_label, perception=None, mode=None):
             "perception": perception,                     # ①②③ face / speech / fatigue 全部
             "state": state,                               # ④ 多模态融合统一状态 JSON
             "reasoning": need.get("reasoning"),           # ⑤ LLM 推理链（ToM + CoT）
+            "latency": need.get("_latency"),              # LLM / MusicGen 延迟
         }
         with open(SESSION_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -236,15 +237,36 @@ def _compose_one(state, mode, session_label=None, duration_sec=None, perception=
 
     mode：'tom_cot' 或 'standard'（已归一化）。perception 仅用于会话日志留存。
     """
+    t0 = time.perf_counter()
+
     if hasattr(LLM, "infer_with_mode"):
         need = LLM.infer_with_mode(state, mode)   # ⑤ (M3) 支持模式切换
     else:
         need = LLM.infer(state)                   # mock 或旧接口：回退默认
+
+    t1 = time.perf_counter()
+
+    music_spec = str(need.get("music_spec", "") or "")
+    print("=" * 60)
+    print(f"[M3] mode={mode}")
+    print(f"[M3] UI duration_sec={duration_sec}")
+    print(f"[M3] music_spec={music_spec[:500]}")
+    print("=" * 60)
+
     # ⑥ MusicGen (M3)，按 UI 滑条时长生成；兼容尚未支持 duration 参数的旧签名。
     try:
-        music = MUSIC.generate(need["music_spec"], duration_sec)
+        music = MUSIC.generate(music_spec, duration_sec)
     except TypeError:
-        music = MUSIC.generate(need["music_spec"])
+        music = MUSIC.generate(music_spec)
+
+    t2 = time.perf_counter()
+
+    need["_latency"] = {
+        "llm_sec": round(t1 - t0, 2),
+        "music_sec": round(t2 - t1, 2),
+        "llm_music_total_sec": round(t2 - t0, 2),
+    }
+
     # 记录系统输出（完整感知/融合/推理，user study 用）
     _log_session(state, need, session_label, perception=perception, mode=mode)
     return need, music
@@ -252,10 +274,20 @@ def _compose_one(state, mode, session_label=None, duration_sec=None, perception=
 
 def _one_mode_text(need, cot=True):
     tag = "Reasoning (CoT)" if cot else "Reasoning"
+    lat = need.get("_latency") or {}
+    latency_text = ""
+    if lat:
+        latency_text = (
+            "\n\n[Latency]\n"
+            f"LLM reasoning: {lat.get('llm_sec')}s\n"
+            f"Music generation: {lat.get('music_sec')}s\n"
+            f"LLM + Music total: {lat.get('llm_music_total_sec')}s"
+        )
     return (
         f"[Need] {need['need']}\n\n"
         f"[{tag}]\n{need['reasoning']}\n\n"
         f"[Music spec]\n{need['music_spec']}"
+        f"{latency_text}"
     )
 
 
@@ -392,8 +424,8 @@ def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot", dur
                "spec_tom": need_tom.get("music_spec", ""),
                "spec_std": need_std.get("music_spec", ""),
                "need_tom": need_tom, "need_std": need_std}
-        m1 = gr.update(value=music_tom, label="⑥-A Music · ToM+CoT (default)", visible=True)
-        m2 = gr.update(value=music_std, label="⑥-B Music · Standard (baseline)", visible=True)
+        m1 = gr.update(value=music_tom, label="⑥-A Music", visible=True)
+        m2 = gr.update(value=music_std, label="⑥-B Music", visible=True)
         return _summary_text(ctx, lang), ctx, reasoning_text, m1, m2
 
     # 单模式
@@ -751,7 +783,7 @@ def build_ui():
         summary_ctx = gr.State(None) # 上一次摘要的最小上下文，切语言时即时重刷用
 
         # 单选框统一用 (显示文本, 稳定值)：显示随语言变，value 恒定，所有解析逻辑不受影响。
-        mode = gr.Radio(t0["mode_choices"], value="auto",
+        mode = gr.Radio(t0["mode_choices"], value="manual",
                         label=t0["mode_label"], info=t0["mode_info"])
 
         session_label = gr.Textbox(label=t0["session_label_label"], value="test",
@@ -773,7 +805,7 @@ def build_ui():
                                 label=t0["lang_label"], info=t0["lang_info"])
 
         # ---------------- 自动模式区 ----------------
-        with gr.Group(visible=True) as auto_group:
+        with gr.Group(visible=False) as auto_group:
             with gr.Row():
                 auto_cam = gr.Image(label=t0["auto_cam_label"],
                                     type="numpy", sources=["webcam"], streaming=True)
@@ -782,7 +814,7 @@ def build_ui():
             auto_note_md = gr.Markdown(t0["auto_note"])
 
         # ---------------- 手动模式区（视频版：录制 → 抽帧+分离音频 → 单次 pipeline）----------------
-        with gr.Group(visible=False) as manual_group:
+        with gr.Group(visible=True) as manual_group:
             manual_note_md = gr.Markdown(t0["manual_note"])
             with gr.Row():
                 man_video = gr.Video(label=t0["man_video_label"],

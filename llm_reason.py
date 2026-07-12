@@ -75,43 +75,43 @@ _STANDARD_EMOTION_MAP: dict[str, tuple[str, str]] = {
         "upbeat positive instrumental",
         "A bright, upbeat positive instrumental with light piano and soft bells, "
         "tempo around 100 BPM, medium energy, cheerful atmosphere, no vocals, "
-        "suitable for a short 5-10 second clip.",
+        "designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "sad": (
         "slow gentle instrumental",
         "A slow, gentle instrumental with soft piano and warm strings, "
         "tempo around 60 BPM, low energy, melancholic but comforting atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "angry": (
         "calming low-energy instrumental",
         "A calming, low-energy instrumental with warm pads and soft electric piano, "
         "tempo around 65 BPM, very low energy, tension-reducing atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "fear": (
         "soft calming instrumental",
         "A soft, calming instrumental with gentle ambient pads and subtle piano, "
         "tempo around 58 BPM, very low energy, reassuring atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "neutral": (
         "balanced gentle instrumental",
         "A balanced, gentle instrumental with soft Rhodes and light texture, "
         "tempo around 75 BPM, low-to-medium energy, neutral-warm atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "surprise": (
         "light curious instrumental",
         "A light, curious instrumental with marimba and soft plucks, "
         "tempo around 90 BPM, medium-low energy, gently playful atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
     "disgust": (
         "calming low-energy instrumental",
         "A smooth, calming low-energy instrumental with warm pads and soft piano, "
         "tempo around 62 BPM, low energy, stabilizing atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip.",
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
     ),
 }
 
@@ -124,7 +124,7 @@ _FALLBACK_RESULT = {
     "music_spec": (
         "A gentle, balanced instrumental piece with soft piano, light ambient texture, "
         "medium-slow tempo, low-to-moderate energy, and no vocals, "
-        "suitable for a short 5 to 10 second clip."
+        "designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
     ),
 }
 
@@ -160,7 +160,7 @@ _OPENAI_SYSTEM_PROMPT = textwrap.dedent("""
     You provide music companionship and affective support only — never medical diagnosis,
     clinical labels, or treatment claims.
 
-    Given multimodal affective state labels, infer what short instrumental music the user
+    Given multimodal affective state labels, infer what instrumental music the user
     may benefit from using Theory-of-Mind and two-stage reasoning.
 
     OUTPUT FORMAT — return ONLY a JSON object with exactly these keys:
@@ -178,7 +178,7 @@ _OPENAI_SYSTEM_PROMPT = textwrap.dedent("""
         Stage 2 - Music response planning
     - "music_spec" must be a single English string (NOT a nested object).
     - music_spec should describe mood, tempo, energy, instrumentation, atmosphere.
-    - Prefer instrumental, no vocals, suitable for a 5-10 second clip.
+    - Prefer instrumental music with no vocals, designed for continuous background listening. Keep the mood, tempo, and instrumentation coherent, use gradual development and smooth transitions, and avoid abrupt changes or dramatic endings.
     - Use cautious language: may benefit from, might need, could support.
     - NEVER use: diagnose, anxiety disorder, depressed, treatment, cure, therapy for
       mental illness, or any clinical diagnosis of the user.
@@ -265,7 +265,7 @@ def build_tom_prompt(state: dict) -> str:
         - Fatigue modality confidence: {n['fatigue_conf']:.2f}
 
         Task: infer what music companionship the user may need right now, then plan
-        a short instrumental music prompt for MusicGen.
+        an instrumental music prompt for MusicGen that is suitable for continuous background listening.
 
         Use theory-of-mind: reason about the user's possible internal state and need
         from the OBSERVED labels only. Use cautious language (may / might / could benefit).
@@ -295,8 +295,8 @@ def build_standard_prompt(state: dict) -> str:
     """
     n = _normalize_state(state)
     return textwrap.dedent(f"""
-        You are EmotiCompanion. Map the detected dominant emotion directly to a
-        short English instrumental music prompt for MusicGen.
+        You are EmotiCompanion. Map the detected dominant emotion directly to an
+        English instrumental music prompt for MusicGen that is suitable for continuous background listening.
 
         Do NOT use theory-of-mind reasoning or multi-step chain-of-thought.
 
@@ -563,7 +563,7 @@ def _build_music_spec(need: str, normalized: dict) -> str:
         return (
             "A soft, neutral ambient instrumental with gentle pads and subtle piano, "
             "slow tempo around 60 BPM, very low energy, calm and non-intrusive atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip."
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
         )
 
     spec_rules: list[tuple[callable, str]] = [
@@ -571,49 +571,49 @@ def _build_music_spec(need: str, normalized: dict) -> str:
             lambda: "low arousal" in need or "calming" in need or "restoration" in need,
             "A slow, warm ambient instrumental piece with soft piano and gentle pads, "
             "tempo around 55-65 BPM, very low energy, soothing and comforting atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "grounding" in need or "de-escalation" in need or "stable rhythm" in need,
             "A steady mid-tempo instrumental with muted percussion and warm bass, "
             "tempo around 80 BPM, moderate-low energy, grounded and stable atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "warm companionship" in need or "gentle comfort" in need or "emotional warmth" in need,
             "A gentle, warm instrumental with acoustic guitar and soft strings, "
             "tempo around 70 BPM, low-to-medium energy, intimate comforting atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "positive energy" in need or "uplifting" in need,
             "A bright, uplifting instrumental with light piano and soft bells, "
             "tempo around 95 BPM, medium energy, cheerful but not overwhelming atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "stable focus" in need or "light companionship" in need or "light engagement" in need,
             "A clean, minimal lo-fi instrumental with soft Rhodes and subtle texture, "
             "tempo around 75 BPM, low energy, focused and unobtrusive atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "curiosity" in need or "playful" in need,
             "A light, playful instrumental with marimba and soft synth plucks, "
             "tempo around 100 BPM, medium-low energy, gently curious atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "tension reduction" in need or "emotional regulation" in need,
             "A smooth, calming instrumental with warm pads and soft electric piano, "
             "tempo around 65 BPM, low energy, tension-reducing atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
         (
             lambda: "reassurance" in need or "reduced arousal" in need,
             "A quiet, reassuring ambient instrumental with soft piano and airy pads, "
             "tempo around 60 BPM, very low energy, safe and calming atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip.",
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending.",
         ),
     ]
 
@@ -625,24 +625,24 @@ def _build_music_spec(need: str, normalized: dict) -> str:
         return (
             "A calm, supportive ambient instrumental with soft piano and gentle pads, "
             "tempo around 65 BPM, low energy, soothing atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip."
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
         )
     if emotion == "happy":
         return (
             "A warm, pleasant instrumental with light piano and soft strings, "
             "tempo around 90 BPM, medium energy, positive atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip."
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
         )
     if fatigue == "high":
         return (
             "A restful ambient instrumental with soft pads and subtle piano, "
             "tempo around 58 BPM, very low energy, drowsy-comfort atmosphere, "
-            "no vocals, suitable for a short 5-10 second clip."
+            "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
         )
     return (
         "A balanced ambient instrumental with soft piano and gentle texture, "
         "tempo around 72 BPM, low-to-medium energy, neutral-warm atmosphere, "
-        "no vocals, suitable for a short 5-10 second clip."
+        "no vocals, designed for continuous background listening, with consistent mood and instrumentation, gradual development, smooth transitions, and no abrupt changes or dramatic ending."
     )
 
 
