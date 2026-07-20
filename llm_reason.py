@@ -703,7 +703,12 @@ def _infer_standard(normalized: dict) -> dict[str, str]:
 
 def infer_with_mode(state: dict, mode: str = "tom_cot") -> dict[str, str]:
     """
-    实验用推理入口：standard baseline vs tom_cot（始终使用规则版，不受 OpenAI 影响）。
+    推理入口：standard baseline vs tom_cot。
+
+    - mode="tom_cot"（默认，生产主路径）：**优先走真实 LLM**（EMOTI_LLM_BACKEND=
+      openai|deepseek 时），调用失败 / 未配置 key 时自动回退规则版 ToM+CoT。
+    - mode="standard"（对照基线）：**始终使用规则版**直接映射，不调用 LLM，
+      用于与 LLM 推理做「有无 ToM+CoT」的对照实验。
 
     Args:
         state: 融合层统一状态 JSON。
@@ -716,6 +721,9 @@ def infer_with_mode(state: dict, mode: str = "tom_cot") -> dict[str, str]:
         normalized = _normalize_state(state)
         if str(mode).lower().strip() == "standard":
             return _infer_standard(normalized)
+        # tom_cot：优先真实 LLM，失败时回退规则版（回退逻辑见 _infer_with_openai_or_fallback）
+        if _uses_llm_api():
+            return _infer_with_openai_or_fallback(state)
         return _infer_tom_cot(normalized)
     except Exception:
         return dict(_FALLBACK_RESULT)
@@ -888,7 +896,8 @@ def _infer_with_openai_or_fallback(state: dict) -> dict[str, str]:
         return dict(result)
     except Exception as exc:
         print(f"[M3] OpenAI LLM unavailable ({type(exc).__name__}), using rule fallback.")
-        return infer_with_mode(state, mode="tom_cot")
+        # 直接调规则版 tom_cot，避免再次进入 infer_with_mode 的 LLM 分支导致递归。
+        return _infer_tom_cot(_normalize_state(state))
 
 
 def infer(state: dict) -> dict[str, str]:
@@ -1059,11 +1068,11 @@ if __name__ == "__main__":
         print(f"[error] infer failed: {type(exc).__name__}: {exc}")
     print()
 
-    print("=== infer_with_mode standard (always rule) ===")
+    print("=== infer_with_mode standard (always rule baseline) ===")
     print(infer_with_mode(test_state, mode="standard"))
     print()
 
-    print("=== infer_with_mode tom_cot (always rule) ===")
+    print("=== infer_with_mode tom_cot (LLM-first, rule fallback) ===")
     print(infer_with_mode(test_state, mode="tom_cot"))
     print()
 
