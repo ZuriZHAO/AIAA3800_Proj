@@ -49,6 +49,11 @@ class MockSpeech:
         return {"emotion": MOCK_EMOTION, "confidence": 0.0,
                 "reasoning": "(mock) speech module not ready, returning calm/neutral."}
 
+    @staticmethod
+    def transcribe(audio_path):
+        # mock：不做转写，返回空串 → ⑨ 风险筛查退化为只看情绪+疲劳
+        return ""
+
 
 class MockFusion:
     """④ 多模态融合的 mock（对应 fusion.py）
@@ -116,3 +121,17 @@ class MockMusic:
         # UI 的音频栏会保持为空，不会播放任何声音。
         # 保留 duration_sec 参数只为与真实 generate() 的签名对齐（mock 忽略它）。
         return None
+
+
+class MockSafety:
+    """⑨ 心理风险分流的 mock（对应 safety.py）：始终判低风险、正常放行。"""
+
+    @staticmethod
+    def screen(state, text=None, lang="en"):
+        zh = str(lang).lower().startswith("zh")
+        return {
+            "risk_level": "low", "score": 0.0, "signals": [],
+            "banner": ("🟢 [Safety Router] (mock) 未启用风险筛查 → 正常推送。" if zh
+                       else "🟢 [Safety Router] (mock) screening off → normal push."),
+            "care_message": "", "pause_music": False, "source": "mock",
+        }

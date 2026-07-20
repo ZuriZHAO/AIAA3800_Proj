@@ -769,6 +769,59 @@ def predict(audio_path):
         return _fallback(f"speech API unavailable: {exc}")
 
 
+def transcribe(audio_path):
+    """把采集到的语音转写成文字（供 ⑨ Safety Router 的心理风险筛查用）。
+
+    复用智增增 Qwen-Omni 多模态音频 API，只要一段纯文字转写；与情绪识别后端
+    (SPEECH_BACKEND) 无关——情绪可走本地 emotion2vec，转写单独走 Omni。
+    无 key / 无音频 / 调用失败 → 一律返回 ""（此时风险筛查退化为只看情绪+疲劳）。
+    """
+    if audio_path is None:
+        return ""
+    try:
+        from openai import OpenAI
+
+        api_key = os.getenv("ZHIZENGZENG_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return ""
+
+        path = Path(audio_path)
+        if not path.exists() or path.stat().st_size <= 0 or path.stat().st_size > MAX_AUDIO_BYTES:
+            return ""
+
+        base_url = os.getenv("ZHIZENGZENG_BASE_URL", ZHIZENGZENG_BASE_URL)
+        model = os.getenv("AUDIO_MODEL", AUDIO_MODEL)
+        fmt, audio_data_url = _audio_to_data_url(path)
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=90.0)
+
+        prompt = (
+            "Transcribe the speech in this audio to plain text, verbatim, in its original "
+            "language. Return ONLY the transcript text — no quotes, no labels, no extra words. "
+            "If there is no intelligible speech, return an empty string."
+        )
+
+        # 与情绪识别一致：先试 OpenAI 风格 input_audio，失败再试 Qwen 风格 audio_url。
+        for audio_part in (
+            {"type": "input_audio", "input_audio": {"data": audio_data_url, "format": fmt}},
+            {"type": "audio_url", "audio_url": {"url": audio_data_url}},
+        ):
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    modalities=["text"],
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": prompt}, audio_part]}],
+                )
+                text = _get_message_content(completion.choices[0].message).strip()
+                return text.strip('"').strip()
+            except Exception:
+                continue
+        return ""
+    except Exception as exc:
+        print(f"[speech] transcribe unavailable: {exc}")
+        return ""
+
+
 def predict_text(text):
     """
     MELD 测试专用：文本情绪识别（不走音频）

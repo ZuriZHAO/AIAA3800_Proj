@@ -9,7 +9,7 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 
 ## 1. 项目简介
 
-人和音乐的交互还停留在静态模式——你选一次曲风，它就固定了，系统不知道你现在是什么状态。EmotiCompanion 做三件事：
+人和音乐的交互还停留在静态模式——你选一次曲风，它就固定了，系统不知道你现在是什么状态。EmotiCompanion 做四件事（感知 → 分流 → 推理 → 生成）：
 
 1. **感知 Perception**：多模态自动感知用户情绪，无需手动告诉系统你的心情
    - 人脸表情情绪（HSEmotion / AffectNet）
@@ -17,6 +17,7 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
    - 疲劳状态（面部关键点 EAR/MAR/PERCLOS）
 2. **推理 Reasoning**：知道情绪还不够，要推断需求。用 LLM + Theory-of-Mind 提示 + CoT 推理，从「情绪+疲劳」推断「心理需求」（例如：焦虑且疲惫 → 低唤醒舒缓；焦虑但清醒 → 稳定接地）
 3. **生成 Generation**：根据推理出的音乐描述词，用 MusicGen 生成专属音频片段
+4. **分流 Safety Router**：在推理/生成之前先做一层**心理健康风险筛查**（结合语音转写文本 + 情绪 + 疲劳，优先 LLM、失败回退规则）。风险较高 → 暂停自动推送音乐、改显示关怀与求助提示；风险较低 → 正常推测音乐调节目标并推送。**仅做困扰提示与求助引导，不做医疗诊断。**
 
 ---
 
@@ -26,13 +27,18 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
   人脸图像 ──┬──► ① 人脸情绪 (HSEmotion)      ──┐
             │                                  │
             └──► ② 疲劳检测 (EAR/MAR/PERCLOS) ──┤
-                                               ├──► ④ 多模态融合 ──► 统一状态 JSON
-  语音音频 ────► ③ 语音情绪 (Qwen-Omni)      ──┘            │
-                                                            ▼
-                                              ⑤ LLM 需求推理 (ToM + CoT)
-                                                            │
-                                                            ▼
-                                              ⑥ 音乐生成 (MusicGen) ──► 🎵
+                                               ├──► ④ 多模态融合 ──► 统一状态 JSON ─┐
+  语音音频 ─┬──► ③ 语音情绪 (emotion2vec+)   ──┘                                   │
+           └──► 语音转写 (Qwen-Omni ASR) ──────────► 文本 ─┐                       │
+                                                          ▼                       ▼
+                                              ⑨ Safety Router（心理健康风险分流）
+                                                  ╱                         ╲
+                                          风险较高                        风险较低
+                                             │                              │
+                                   关怀 + 求助提示             ⑤ LLM 需求推理 (ToM + CoT)
+                                   暂停自动推送音乐                         │
+                                                                          ▼
+                                                              ⑥ 音乐生成 (MusicGen) ──► 🎵
   ⑦ GradCAM 热力图旁挂在①上，⑧ Gradio app.py 串联全部
 ```
 
@@ -41,9 +47,10 @@ AIAA 3800 课程项目 · HKUST(GZ) · 2026
 | ① | 人脸情绪 | `face_emotion.py` | HSEmotion (EfficientNet-B0, AffectNet-8) | M1 |
 | ⑦ | GradCAM 可解释 | `face_emotion.py` | 对①同一模型做 Grad-CAM 热力图 | M1 |
 | ② | 疲劳检测 | `fatigue.py` | MediaPipe FaceLandmarker → EAR/MAR/PERCLOS | M4 |
-| ③ | 语音情绪 | `speech_emotion.py` | **emotion2vec+（默认，本地）** / Qwen-Omni API（可切，读语义） | M2 |
+| ③ | 语音情绪 | `speech_emotion.py` | **emotion2vec+（默认，本地）** / Qwen-Omni API（可切，读语义）；另含 `transcribe()` 语音转写 | M2 |
 | — | 音频抽取 | `audio_extract.py` | ffmpeg 从视频抽 wav（实验用） | M2 |
 | ④ | 多模态融合 | `fusion.py` | naive / weighted / weighted_cam / bayes 四模式 | M2/M4 |
+| ⑨ | 心理健康风险分流 | `safety.py` | 语音转写文本 + 情绪/疲劳；LLM 优先 + 规则回退 + 危机词硬兜底 | 新增 |
 | ⑤ | LLM 需求推理 | `llm_reason.py` | ToM + 两段式 CoT，规则版 / DeepSeek-OpenAI 后端 | M3 |
 | ⑥ | 音乐生成 | `music_gen.py` | MusicGen (Hugging Face Transformers) | M3 |
 | ⑧ | UI + 集成 | `app.py` | Gradio 双模式，动态加载各模块 | M4 |
@@ -89,8 +96,8 @@ EmotiCompanion module loading status:
 
 页面顶部 **Mode** 单选框切换：
 
-- **自动模式 Auto（默认）**：摄像头/麦克风持续运行，每 `AUTO_INTERVAL_SEC` 秒（`config.py`，当前 5）自动捕捉一帧 + 一段录音跑一次 pipeline，音乐自动播放、陪伴一直存在直到关网页。**情绪与疲劳都不变时不更换音乐**（当前曲子继续播不打断）。
-- **手动模式 Manual**：传统拍照/上传 + 录音/上传窗口，点 **▶ Run Pipeline once** 跑单次。
+- **自动模式 Auto（默认）**：摄像头/麦克风持续运行，每 `AUTO_INTERVAL_SEC` 秒（`config.py`，当前 5）自动捕捉一帧 + 一段录音跑一次 pipeline，音乐自动播放、陪伴一直存在直到关网页。**情绪与疲劳都不变、且距上次生成不到 `MUSIC_REFRESH_SEC`（默认 90s）时**，跳过最贵的 ⑤LLM+⑥音乐、当前曲子继续播不打断；状态变了或超过刷新窗口才重新生成（同状态则生成一段变奏）。**⑨ 心理风险较高时暂停自动推送、改显示关怀与求助提示。**
+- **手动模式 Manual（视频版）**：点视频框的 **● 录制** 录一段，**■ 停止**后自动从视频随机抽一帧当人脸图像、分离音频当语音，跑单次 pipeline。
 
 ---
 
@@ -101,12 +108,13 @@ AIAA3800_Proj/
 ├── README.md              # 本文档（项目介绍 + 开发者指南 + FAQ）
 ├── app.py                 # ⑧ 集成层：动态加载模块 + 串 pipeline + 双模式 UI
 ├── config.py              # 全局常量与 schema（情绪词表、疲劳等级、捕捉间隔…）
-├── mocks.py               # 6 模块的 mock 占位（真实文件未就绪时自动启用）
+├── mocks.py               # 7 模块的 mock 占位（真实文件未就绪时自动启用）
 ├── face_emotion.py        # ① 人脸情绪 + ⑦ GradCAM (M1)
 ├── fatigue.py             # ② 疲劳检测 (M4)
-├── speech_emotion.py      # ③ 语音情绪 (M2)
+├── speech_emotion.py      # ③ 语音情绪 + transcribe() 语音转写 (M2)
 ├── audio_extract.py       # 视频→wav 音频抽取工具 (M2)
 ├── fusion.py              # ④ 多模态融合 naive/weighted/weighted_cam/bayes (M2/M4)
+├── safety.py              # ⑨ 心理健康风险分流 Safety Router（新增）
 ├── llm_reason.py          # ⑤ LLM 需求推理 (M3)
 ├── music_gen.py           # ⑥ 音乐生成 (M3)
 ├── requirements.txt       # 完整依赖清单（含最小 mock 说明）
@@ -140,7 +148,9 @@ AIAA3800_Proj/
 | `face_emotion.py` | M1 | `gradcam(image)` | 热力图 image (np.ndarray) |
 | `fatigue.py` | M4 | `predict(image)` | `{"fatigue_level": str, "confidence": float}` |
 | `speech_emotion.py` | M2 | `predict(audio_path)` | `{"emotion": str, "confidence": float, "reasoning": str}` |
+| `speech_emotion.py` | M2 | `transcribe(audio_path)`（供 ⑨） | 语音转写文本 str（无 key/失败为空串） |
 | `fusion.py` | M2/M4 | `fuse(face, speech, fatigue)` | 统一状态 JSON（见下） |
+| `safety.py` | 新增 | `screen(state, text, lang)` | `{risk_level, score, signals, banner, care_message, pause_music, source}` |
 | `llm_reason.py` | M3 | `infer(state)` | `{"need": str, "reasoning": str, "music_spec": str}` |
 | `music_gen.py` | M3 | `generate(music_spec)` | 音频（路径 str 或 `(sr, np.ndarray)` 或 None） |
 
@@ -179,7 +189,8 @@ neutral / happy / sad / angry / fear / surprise / disgust
 
 - **动态加载**：`_load()` 尝试 `import` 成员文件，成功用真实模块，失败（文件不存在 / 依赖没装 / 报错）回退 `mocks.py` 对应类。启动日志的 `[OK ]`/`[mock]` 就是这一步的结果。
 - **常量集中在 `config.py`**：`EMOTION_LABELS`（7 类词表）、`FATIGUE_LEVELS`、`FUSION_SCHEMA_EXAMPLE`、`AUTO_INTERVAL_SEC`（=5）、`SOOTHE_EMOTIONS`、`MOCK_EMOTION/MOCK_FATIGUE`。改这些改一处，别在别的文件另写一份。
-- **不换音乐的判断**：`_state_key(state)` 取 `(dominant_emotion, fatigue)`；`auto_step` 比较本轮与上轮，相同 → 音乐输出 `gr.skip()` 继续播，不同 → 重新推理+生成。
+- **自动模式音乐节流**：`_state_key(state)` 取 `(dominant_emotion, fatigue)`；`auto_step` 比较本轮与上轮——相同**且距上次生成 <`MUSIC_REFRESH_SEC`（默认 90s）** → 跳过 ⑤LLM+⑥音乐、`gr.skip()` 继续播（省最贵的一步）；状态变了或超过刷新窗口 → 重新推理+生成（同状态则生成变奏）。高风险 → 暂停推送并把计时归零、下一 tick 重新完整评估。
+- **⑨ 心理风险分流（新增）**：`_perceive_and_fuse` 用线程池**并发**调用 `SPEECH.transcribe()`（Qwen-Omni ASR，与本地感知①②③⑦重叠、按音频时长门控）把语音转成文本，塞进 `perception["transcript"]`；`_reason_and_compose` 先跑 `SAFETY.screen()`，风险高即暂停音乐、显示关怀与求助。相关开关（环境变量）：`MUSIC_REFRESH_SEC`(90)、`SAFETY_MIN_TRANSCRIBE_SEC`(1.5，短于此不转写)、`SAFETY_AUTO_TRANSCRIBE`(1，设 0 则自动模式不转写、只用情绪+疲劳筛查)。
 - **自动模式两个已修复的坑（勿改回）**：① 摄像头流式直接驱动 pipeline（`auto_cam.stream(fn=auto_step, stream_every=AUTO_INTERVAL_SEC)`），不要用 `gr.Timer`+State 中转（会读到 None 导致输出不刷新）；② 流式麦克风必须 `type="numpy"`（`filepath` 会每秒 422 报错）。
 
 ### 6.1 ① 人脸情绪 + ⑦ GradCAM `face_emotion.py`（M1）
@@ -202,6 +213,7 @@ neutral / happy / sad / angry / fear / surprise / disgust
 - **`predict(audio_path)`**：调智增增网关的 `qwen3-omni-flash`，prompt 要求**同时结合语音内容与声学线索**（pitch/energy/rhythm/pause/tone…），返回 `{emotion, confidence, reasoning}`，emotion 映射进 7 类词表。空音频/文件不存在/API 失败/解析失败 → 安全回退 `neutral, 0.0`。
 - **置信度处理**：Omni 模型易对 `neutral` 过度自信，`_calibrate_confidence` 在 reasoning 出现模板化「平淡」描述时压低其置信度，避免融合阶段错误的高置信 neutral 压过其他模态。这是「模型自评置信度 + 规则校准」方案。
 - **`audio_extract.extract_audio(video_path)`**：用 ffmpeg 抽单声道 16kHz wav，供 RAVDESS/MELD 这类视频数据接入语音模块（消融用）。
+- **`transcribe(audio_path)`（新增，供 ⑨ 心理风险分流）**：用同一 Qwen-Omni 网关把采集的语音转写成纯文本，喂给 `safety.screen()` 做风险筛查。**与情绪后端 `SPEECH_BACKEND` 无关**（情绪可走本地 emotion2vec，转写单独走 Omni）；无 `ZHIZENGZENG_API_KEY` / 无音频 / 失败 → 返回空串（此时风险筛查退化为只看情绪+疲劳）。`app.py` 里按音频时长门控、且与本地感知并发调用。
 
 ### 6.4 ④ 多模态融合 `fusion.py`（M2/M4）
 
@@ -225,6 +237,22 @@ neutral / happy / sad / angry / fear / surprise / disgust
 ### 6.6 ⑥ 音乐生成 `music_gen.py`（M3）
 
 - **`generate(music_spec)`**：优先用 Hugging Face Transformers 的 **MusicGen**（`facebook/musicgen-small`）从文本生成 wav（写到 `outputs/`）；不可用时回退到简单合成音（仅供 UI/流程测试）。首次运行会下载 musicgen-small 权重。
+
+### 6.7 ⑨ 心理健康风险分流 `safety.py`（Safety Router，新增）
+
+老师建议增加的一层：夹在 **④融合** 与 **⑤推理** 之间，先判用户的心理健康风险，再决定"正常推送音乐"还是"暂停并给关怀求助"。
+
+- **`screen(state, text, lang)`**：综合「语音转写文本 + 情绪 + 疲劳 + 置信度」判风险等级 `low/medium/high`，返回 `{risk_level, score, signals, banner, care_message, pause_music, source}`。
+- **识别策略（与 `llm_reason.py` 一致：LLM 优先，失败回退）**：
+  - 优先**真实 LLM**（复用同一套 `EMOTI_LLM_BACKEND` / key），让模型综合文本与情绪疲劳判风险；
+  - LLM 未配置 / 调用失败 → 回退**规则版**（关键词 + 情绪疲劳启发式）；
+  - **危机词命中 → 强制 `high`**（安全硬兜底，不给 LLM 下调机会）。
+- **Safety Router 行为**（都打印在原有的 UI 位置）：
+  - 风险**高** → 暂停自动推送音乐；在「💬 给你的说明」显示**关怀 + 求助资源**（HKUST(GZ) 心理咨询预约方式 + 国家心理援助热线 **12356**）；在「⑤ 推理区」显示分流详情（含 `source=llm/rule/...` 便于 demo 核实走了哪条路）。
+  - 风险**低/中** → 正常推送音乐，只在推理区前加一行风险横幅。
+- **求助热线/咨询方式为固定模板**（写死在 `safety.py`，**不由 LLM 生成**），避免编造错误的危机资源。
+- **省调用**：文本为空且情绪风险低 → 短路不调 LLM；按 `(情绪, 疲劳, 文本)` 轻量缓存，自动模式稳定状态不重复请求。
+- **伦理**：仅提供**困扰信号提示与求助引导**，不做医疗诊断/治疗；关键词命中 ≠ 诊断，只是让系统更谨慎。
 
 ---
 
@@ -296,6 +324,10 @@ EMOTI_LLM_BACKEND=deepseek
 DEEPSEEK_API_KEY=your_deepseek_key
 ```
 两个模块启动都会 `load_dotenv()` 读它。不填 key：语音回退 neutral、LLM 回退本地规则版，仍能跑。
+（⑨ 心理风险分流复用这两套：语音转写用 `ZHIZENGZENG_*`，风险判断用 `EMOTI_LLM_BACKEND`/`DEEPSEEK_API_KEY`，**无需新增 key**。）
+
+**Q：⑨ 心理健康风险分流怎么工作？会误判吗？**
+`safety.py` 结合**语音转写文本 + 情绪 + 疲劳**判风险：优先 LLM、失败回退关键词规则、危机词强制 `high`。它只做**困扰信号提示与求助引导**（校内心理咨询预约 + 国家热线 12356），**不做医疗诊断**。没配 LLM key 时退化为「关键词 + 情绪疲劳」规则；`SAFETY_AUTO_TRANSCRIBE=0` 可让自动模式不转写、只用情绪+疲劳筛查。相关开关见 §6.0。
 
 **Q：版本踩坑？**
 `timm` 必须 `0.9.16`（hsemotion 权重兼容）；`transformers 5.x` 已验证 MusicGen 可用；新版 `mediapipe` 已移除旧 `mp.solutions`，`fatigue.py` 用 Tasks API + `models/face_landmarker.task`。都写进了 `requirements.txt` / `requirements/`。
@@ -319,6 +351,7 @@ ffmpeg 是系统程序不是 pip 包，`conda install -n 3800 -c conda-forge ffm
 - **语音置信度**：`api` 后端为模型自评+规则校准（非严格概率）；`ser`/`emotion2vec` 为 softmax 概率。
 - **bayes 融合泛化性**：臂 F 的逐类先验在 CREMA-D 上学，迁移到真实部署分布的收益未验证，故默认仍用 weighted。
 - **语音在线 API**：速度/稳定性受网络影响，自动模式每轮同步调用会有延迟（见 experiment_plan 与后续优化）。
+- **心理风险分流非临床（⑨）**：仅做困扰信号提示与求助引导，**不是诊断工具**；规则回退基于关键词，存在漏判/误判可能，且依赖语音转写质量（无 Qwen key 时退化为仅情绪+疲劳）。求助资源需部署方核实并保持更新。
 - **疲劳单帧**：用跨调用滚动窗口近似 PERCLOS，换用户应调 `fatigue.reset_history()`。
 
 ---

@@ -40,6 +40,7 @@ import os
 import tempfile
 import time
 import wave
+import concurrent.futures
 
 from dotenv import load_dotenv
 
@@ -141,6 +142,7 @@ SPEECH = _load("speech_emotion", mocks.MockSpeech, "③ speech (M2)")
 FUSION = _load("fusion", mocks.MockFusion, "④ fusion (M2/M4)")
 LLM = _load("llm_reason", mocks.MockLLM, "⑤ LLM reasoning (M3)")
 MUSIC = _load("music_gen", mocks.MockMusic, "⑥ music gen (M3)")
+SAFETY = _load("safety", mocks.MockSafety, "⑨ safety router (M?)")
 
 
 # =============================================================================
@@ -152,9 +154,44 @@ def _state_key(state):
     return (state.get("dominant_emotion"), state.get("fatigue"))
 
 
-def _perceive_and_fuse(image, audio, speech_mode=None):
-    """跑 ①②③ 感知 + ⑦ 热力图 + ④ 融合，返回 (perception, heatmap, state)。"""
+# ---- 语音转写（供 ⑨ 风险筛查）的开销控制 ----
+# 只有音频时长 ≥ 此值才转写，跳过静音/极短片段，省一次 Omni 调用。
+MIN_TRANSCRIBE_SEC = float(os.getenv("SAFETY_MIN_TRANSCRIBE_SEC", "1.5"))
+# 自动模式是否转写：默认开（仍受时长门控）；设 0 则自动模式完全不转写，只用情绪+疲劳筛查。
+AUTO_TRANSCRIBE = os.getenv("SAFETY_AUTO_TRANSCRIBE", "1").strip().lower() not in {"0", "false", "no", ""}
+# 复用的线程池：让「语音转写(网络)」与本地感知①②③⑦并发，而不是串行等待。
+_PERCEPTION_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+
+def _should_transcribe(audio):
+    """音频足够长（可能含人声）才值得转写；读不出时长时保守放行。"""
+    if not audio:
+        return False
+    try:
+        with wave.open(str(audio), "rb") as wf:
+            dur = wf.getnframes() / float(wf.getframerate() or 1)
+        return dur >= MIN_TRANSCRIBE_SEC
+    except Exception:
+        return True
+
+
+def _perceive_and_fuse(image, audio, speech_mode=None, mode=None):
+    """跑 ①②③ 感知 + ⑦ 热力图 + ④ 融合，返回 (perception, heatmap, state)。
+
+    mode：'auto' / 'manual' / None，仅用于决定是否做语音转写（供 ⑨ 风险筛查）。
+    语音转写走 Omni API（网络），这里与本地感知并发执行以省串行等待。
+    """
     backend = _set_speech_backend_from_ui(speech_mode)
+
+    # 先并发启动「语音转写」（网络耗时），与下面的本地感知①②③⑦重叠。
+    # 仅在音频够长、且未被开关关闭时才转写（自动模式可用 SAFETY_AUTO_TRANSCRIBE=0 关掉）。
+    want_transcribe = (
+        hasattr(SPEECH, "transcribe")
+        and _should_transcribe(audio)
+        and not (mode == "auto" and not AUTO_TRANSCRIBE)
+    )
+    transcribe_future = _PERCEPTION_POOL.submit(SPEECH.transcribe, audio) if want_transcribe else None
+
     face = FACE.predict(image)          # ① 人脸情绪 (M1)
     heatmap = FACE.gradcam(image)       # ⑦ GradCAM (M1)
     fatigue = FATIGUE.predict(image)    # ② 疲劳/压力 (M4)
@@ -166,7 +203,16 @@ def _perceive_and_fuse(image, audio, speech_mode=None):
         speech.setdefault("backend", backend)
 
     state = FUSION.fuse(face, speech, fatigue)  # ④ 融合 (M2/M4)
-    perception = {"face": face, "speech": speech, "fatigue": fatigue}
+
+    # 取回并发的转写结果（失败/超时 → 空串，风险筛查退化为只看情绪+疲劳）。
+    transcript = ""
+    if transcribe_future is not None:
+        try:
+            transcript = transcribe_future.result(timeout=90) or ""
+        except Exception as e:
+            print(f"[safety] transcribe failed: {e}")
+
+    perception = {"face": face, "speech": speech, "fatigue": fatigue, "transcript": transcript}
     return perception, heatmap, state
 
 
@@ -376,6 +422,11 @@ def _summary_text(ctx, lang="en"):
     """
     if not ctx:
         return gr.skip()
+    # 高风险：语言切换时也保持关怀语（按新语言重取），不落回普通推荐语。
+    triage = ctx.get("triage")
+    if triage and triage.get("risk_level") == "high":
+        return SAFETY.screen(ctx.get("state"), ctx.get("user_text", ""), lang).get(
+            "care_message") or triage.get("care_message")
     try:
         if ctx.get("both"):
             if hasattr(LLM, "summarize_both_for_user"):
@@ -401,12 +452,28 @@ def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot", dur
 
     reasoning_mode：'tom_cot'（默认）/ 'standard' / 'both'（两种都跑，生成两段音乐）。
     duration_sec：UI 滑条选择的音乐生成时长（秒，0~120）；None 时用 music_gen 的默认值。
-    perception：①②③ 感知结果，仅用于会话日志留存。
+    perception：①②③ 感知结果，用于会话日志留存；其中 transcript（语音转写）供 ⑨ 风险筛查。
     lang：摘要语言，'en'（默认）或 'zh'。
 
     music1_update / music2_update 都是 gr.update()：动态设置每个播放器的音频与标注，
     并在非 both 模式下隐藏第二个播放器，保证「标清楚 + 不误导」。
     """
+    # ⑨ Safety Router：先做心理风险分流（结合 采集语音的转写 + ④情绪/疲劳/置信度）。
+    user_text = str((perception or {}).get("transcript") or "")
+    triage = SAFETY.screen(state, user_text, lang)
+
+    if triage.get("risk_level") == "high" and triage.get("pause_music"):
+        # 风险较高：显示关怀与求助，暂停自动推送音乐（跳过 ⑤ LLM + ⑥ 音乐）。
+        reasoning_text = (
+            f"{triage['banner']}\n\n"
+            f"[Safety Router] risk=high  score={triage['score']:.2f}  source={triage.get('source')}\n"
+            "signals:\n  - " + "\n  - ".join(triage.get("signals") or ["(none)"])
+        )
+        ctx = {"both": False, "state": state, "spec": "", "need": None,
+               "triage": triage, "user_text": user_text}
+        # 两个播放器都 gr.skip()：不推新音乐（保留当前 / 静默），即「暂停自动推送」。
+        return triage["care_message"], ctx, reasoning_text, gr.skip(), gr.skip()
+
     text = str(reasoning_mode).lower()
 
     if "both" in text:
@@ -420,10 +487,12 @@ def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot", dur
             "########## 下方播放器：Standard (baseline) ##########\n"
             f"{_one_mode_text(need_std, cot=False)}"
         )
+        reasoning_text = triage["banner"] + "\n\n" + reasoning_text
         ctx = {"both": True, "state": state,
                "spec_tom": need_tom.get("music_spec", ""),
                "spec_std": need_std.get("music_spec", ""),
-               "need_tom": need_tom, "need_std": need_std}
+               "need_tom": need_tom, "need_std": need_std,
+               "triage": triage, "user_text": user_text}
         m1 = gr.update(value=music_tom, label="⑥-A Music", visible=True)
         m2 = gr.update(value=music_std, label="⑥-B Music", visible=True)
         return _summary_text(ctx, lang), ctx, reasoning_text, m1, m2
@@ -437,7 +506,9 @@ def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot", dur
     else:
         reasoning_text = _one_mode_text(need, cot=True)
         label = "⑥ Music · ToM+CoT (default)"
-    ctx = {"both": False, "state": state, "spec": need.get("music_spec", ""), "need": need}
+    reasoning_text = triage["banner"] + "\n\n" + reasoning_text
+    ctx = {"both": False, "state": state, "spec": need.get("music_spec", ""), "need": need,
+           "triage": triage, "user_text": user_text}
     m1 = gr.update(value=music, label=label, visible=True)
     # 非 both：清空并隐藏第二个播放器，避免看到上一次的残留。
     m2 = gr.update(value=None, label="⑥-B Music · (Both 模式第二段)", visible=False)
@@ -491,19 +562,12 @@ def _texts():
         "mode_info": (f"Auto: camera & mic keep running; capture every {a}s, music stays on "
                       "until you close the page. Manual: record a video, then process once."),
         "mode_choices": [("Auto (continuous)", "auto"), ("Manual (one-shot)", "manual")],
-        "session_label_label": "🧪 Session label",
-        "session_label_info": ("Enter a participant ID (e.g. P03) during the study; keep 'test' "
-                               "otherwise. Used to separate rows in the session log."),
         "reasoning_label": "⑤ Reasoning mode",
         "reasoning_info": ("ToM+CoT: two-stage reasoning (default). Standard: direct emotion→style "
                            "baseline. Both: generate both, with a second player below."),
         "reasoning_choices": [("ToM+CoT (default)", "tom_cot"),
                               ("Standard (baseline)", "standard"),
                               ("Both (both modes)", "both")],
-        "speech_label": "③ Speech backend",
-        "speech_info": "Default emotion2vec; switch to API/Qwen-Omni to compare. Applies on the next run.",
-        "speech_choices": [("emotion2vec (local, recommended)", "emotion2vec"),
-                           ("API / Qwen-Omni", "api")],
         "duration_label": "⑥ Music length (seconds)",
         "duration_info": (f"Drag to choose the music length, 0–{mx}s; 0 = no music (silent). "
                           "Longer = slower. Applies on the next run."),
@@ -531,14 +595,6 @@ def _texts():
         "reasoning_out_label": "⑤ LLM need inference (ToM + CoT) · live status",
         "music_label": "⑥ Music companion (auto-plays)",
         "music2_label": "⑥-B Music · (second clip, Both mode)",
-        "footer": (
-            "---\n"
-            "> Modules live in each member's own file: `face_emotion.py`(M1) · "
-            "`fatigue.py`(M4) · `speech_emotion.py`(M2) · `fusion.py`(M2/M4) · "
-            "`llm_reason.py`(M3) · `music_gen.py`(M3). Not-ready modules fall back to "
-            "mock automatically; load status is printed to the console on startup. "
-            "Shared constants are in `config.py`."
-        ),
     }
     zh = {
         "app_title": (
@@ -551,18 +607,12 @@ def _texts():
         "mode_info": (f"自动：摄像头/麦克风持续工作，每 {a} 秒捕捉一次，音乐一直陪伴直到关闭网页。"
                       "手动：录一段视频再处理一次。"),
         "mode_choices": [("自动（持续）", "auto"), ("手动（单次）", "manual")],
-        "session_label_label": "🧪 会话标签",
-        "session_label_info": "实验时填参与者编号（如 P03）；平时保持 test。用于区分会话日志里的数据。",
         "reasoning_label": "⑤ 推理模式",
         "reasoning_info": ("ToM+CoT：两段式推理（默认）。Standard：情绪→曲风直接查表基线。"
                            "Both：两种都生成，下方出现第二个播放器。"),
         "reasoning_choices": [("ToM+CoT（默认）", "tom_cot"),
                               ("Standard（基线）", "standard"),
                               ("Both（两种都生成）", "both")],
-        "speech_label": "③ 语音后端",
-        "speech_info": "默认 emotion2vec；可切 API/Qwen-Omni 做对比。下一次运行生效。",
-        "speech_choices": [("emotion2vec（本地，推荐）", "emotion2vec"),
-                           ("API / Qwen-Omni", "api")],
         "duration_label": "⑥ 音乐长度（秒）",
         "duration_info": (f"拖动选择生成音乐的时长，0~{mx}s；0=不生成（静音）。越长越慢，下一次运行生效。"),
         "lang_label": "🌐 语言",
@@ -586,13 +636,6 @@ def _texts():
         "reasoning_out_label": "⑤ LLM 需求推理（ToM + CoT）· 实时状态",
         "music_label": "⑥ 音乐陪伴（自动播放）",
         "music2_label": "⑥-B 音乐 · (Both 模式第二段)",
-        "footer": (
-            "---\n"
-            "> 各模块在各自成员的文件里：`face_emotion.py`(M1) · `fatigue.py`(M4) · "
-            "`speech_emotion.py`(M2) · `fusion.py`(M2/M4) · `llm_reason.py`(M3) · "
-            "`music_gen.py`(M3)。未就绪的模块会自动回退到 mock；启动时控制台会打印加载状态。"
-            "共享常量在 `config.py`。"
-        ),
     }
     return {"en": en, "zh": zh}
 
@@ -601,7 +644,7 @@ def _texts():
 # =============================================================================
 
 def run_manual(image, audio, session_label=None, reasoning_mode="tom_cot", speech_mode=None, duration_sec=None, summary_lang="en"):
-    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode)
+    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode, mode="manual")
     summary_text, summary_ctx, reasoning_text, music, music2 = _reason_and_compose(
         state, session_label, reasoning_mode, duration_sec, perception, _norm_lang(summary_lang))
     _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
@@ -678,7 +721,7 @@ def run_manual_video(video_path, session_label=None, reasoning_mode="tom_cot", s
         print(f"[manual-video] audio extract failed: {e}")
         audio = None
 
-    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode)
+    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode, mode="manual")
     summary_text, summary_ctx, reasoning_text, music, music2 = _reason_and_compose(
         state, session_label, reasoning_mode, duration_sec, perception, lang)
     _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
@@ -707,27 +750,51 @@ def auto_step(image, audio_buffer, last_key, last_music_ts, session_label=None, 
         return (note, gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), last_key, last_music_ts, [])
 
     audio = buffer_to_wav(audio_buffer)
-    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode)
+    perception, heatmap, state = _perceive_and_fuse(image, audio, speech_mode, mode="auto")
     key = _state_key(state)
+    transcript = str(perception.get("transcript") or "")
 
-    # Auto mode: every valid detection generates a fresh music clip.
-    # Even if emotion/fatigue are unchanged, we regenerate a same-state variation
-    # so the companion does not become silent or feel static after the previous clip ends.
+    # ⑨ 先做一次风险筛查（_reason_and_compose 内部会命中同参数缓存，不重复请求）。
+    triage = SAFETY.screen(state, transcript, lang)
+    high_risk = (triage.get("risk_level") == "high" and triage.get("pause_music"))
+
+    now = time.time()
+    unchanged = (key == last_key)
+    within_window = (now - float(last_music_ts or 0.0)) < MUSIC_REFRESH_SEC
+
+    # 非高风险 + 状态没变 + 距上次生成不到 MUSIC_REFRESH_SEC → 跳过最贵的 ⑤LLM+⑥音乐，
+    # 保持当前音乐继续播（省时的关键）。摘要/播放器都用 gr.skip() 维持不变。
+    if not high_risk and unchanged and within_window:
+        left = int(MUSIC_REFRESH_SEC - (now - float(last_music_ts or 0.0)))
+        reasoning_text = (
+            f"[{ts}] state unchanged (emotion={key[0]}, fatigue={key[1]}); "
+            f"within {int(MUSIC_REFRESH_SEC)}s refresh window (~{left}s left) → "
+            f"kept current music, skipped ⑤ LLM + ⑥ music.\n\n{triage.get('banner', '')}"
+        )
+        return (gr.skip(), gr.skip(), heatmap, _dump(perception), _dump(state),
+                reasoning_text, gr.skip(), gr.skip(), key, last_music_ts, [])
+
+    # 否则（状态变了 / 刷新窗口已到 / 高风险）→ 走完整流程。
+    # 高风险时 _reason_and_compose 会给关怀语并暂停音乐；否则重生成 ⑤⑥。
     summary_text, summary_ctx, reasoning_text, music, music2 = _reason_and_compose(
         state, session_label, reasoning_mode, duration_sec, perception, lang)
     _save_media(image, heatmap, session_label)   # user study 时留存 ⑦/② 可视化（默认关闭）
 
-    if key == last_key:
-        reasoning_text = (
-            f"[{ts}] state unchanged "
-            f"(emotion={key[0]}, fatigue={key[1]}) → regenerated a new same-state music variation.\n\n"
-            + reasoning_text
-        )
+    if high_risk:
+        # 暂停推送：把计时归零，强制下一 tick 重新完整评估（风险解除后立刻恢复音乐、不残留旧说明）。
+        new_ts = 0.0
     else:
-        reasoning_text = f"[{ts}] state CHANGED → regenerated music.\n\n" + reasoning_text
+        new_ts = now                      # 生成了新音乐 → 重置刷新窗口
+        if unchanged:
+            reasoning_text = (
+                f"[{ts}] state unchanged but {int(MUSIC_REFRESH_SEC)}s refresh window elapsed "
+                f"→ regenerated a same-state music variation.\n\n" + reasoning_text
+            )
+        else:
+            reasoning_text = f"[{ts}] state CHANGED → regenerated music.\n\n" + reasoning_text
 
     return (summary_text, summary_ctx, heatmap, _dump(perception), _dump(state),
-            reasoning_text, music, music2, key, time.time(), [])
+            reasoning_text, music, music2, key, new_ts, [])
 
 
 def accumulate_audio(new_chunk, buffer):
@@ -786,14 +853,14 @@ def build_ui():
         mode = gr.Radio(t0["mode_choices"], value="manual",
                         label=t0["mode_label"], info=t0["mode_info"])
 
-        session_label = gr.Textbox(label=t0["session_label_label"], value="test",
-                                   info=t0["session_label_info"])
+        # 会话标签与语音后端不再作为可见控件：固定为 test / 环境默认，用隐藏 State 承载，
+        # 保持各回调 inputs 的位置不变（值照常流入函数）。
+        session_label = gr.State("test")
 
         reasoning_mode = gr.Radio(t0["reasoning_choices"], value="tom_cot",
                                   label=t0["reasoning_label"], info=t0["reasoning_info"])
 
-        speech_mode = gr.Radio(t0["speech_choices"], value=_speech_mode_value_from_env(),
-                               label=t0["speech_label"], info=t0["speech_info"])
+        speech_mode = gr.State(_speech_mode_value_from_env())
 
         music_duration = gr.Slider(
             minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
@@ -806,28 +873,31 @@ def build_ui():
 
         # ---------------- 自动模式区 ----------------
         with gr.Group(visible=False) as auto_group:
-            with gr.Row():
+            # 摄像头 · 麦克风 · ⑦ GradCAM 热力图 并排（统一缩小）。
+            with gr.Row(equal_height=True):
                 auto_cam = gr.Image(label=t0["auto_cam_label"],
-                                    type="numpy", sources=["webcam"], streaming=True)
+                                    type="numpy", sources=["webcam"], streaming=True, height=240)
                 auto_mic = gr.Audio(label=t0["auto_mic_label"],
                                     type="numpy", sources=["microphone"], streaming=True)
+                heatmap_auto = gr.Image(label=t0["heatmap_label"], height=240)
             auto_note_md = gr.Markdown(t0["auto_note"])
 
         # ---------------- 手动模式区（视频版：录制 → 抽帧+分离音频 → 单次 pipeline）----------------
         with gr.Group(visible=True) as manual_group:
             manual_note_md = gr.Markdown(t0["manual_note"])
-            with gr.Row():
+            # 录制视频 · 随机抽取的输入帧 · ⑦ GradCAM 热力图 并排（统一缩小，避免过于突兀）。
+            with gr.Row(equal_height=True):
                 man_video = gr.Video(label=t0["man_video_label"],
-                                     sources=["webcam"], include_audio=True,
+                                     sources=["webcam"], include_audio=True, height=240,
                                      webcam_options=gr.WebcamOptions(mirror=False))
-                man_frame = gr.Image(label=t0["man_frame_label"], type="numpy")
+                man_frame = gr.Image(label=t0["man_frame_label"], type="numpy", height=240)
+                heatmap_manual = gr.Image(label=t0["heatmap_label"], height=240)
             run_btn = gr.Button(t0["run_btn_label"], variant="primary")
 
         # ---------------- 输出区（两模式共用）----------------
         # 面向用户的友好摘要：由大模型生成（未配置 LLM 后端时回退模板），显眼常显。
         summary_out = gr.Textbox(label=t0["summary_label"], lines=3, interactive=False,
                                  placeholder=t0["summary_placeholder"])
-        heatmap_out = gr.Image(label=t0["heatmap_label"])
 
         # 中间产物（①②③ 感知 / ④ 融合 / ⑤ 推理）默认收起：一般用户不需要看，需要时展开。
         with gr.Accordion(t0["accordion_label"], open=False) as details_accordion:
@@ -839,7 +909,10 @@ def build_ui():
         # 第二个播放器：只在 Both 模式出现，默认隐藏；不 autoplay，避免与上面重叠出声。
         music_out_2 = gr.Audio(label=t0["music2_label"], autoplay=False, visible=False)
 
-        outputs = [summary_out, summary_ctx, heatmap_out, perception_out, fusion_out, reasoning_out, music_out, music_out_2]
+        # 输出列表按模式区分 heatmap 目标：auto_step 的热力图刷到自动组里的 heatmap_auto，
+        # run_manual_video 的刷到手动组里的 heatmap_manual（其余位置完全一致）。
+        outputs_auto = [summary_out, summary_ctx, heatmap_auto, perception_out, fusion_out, reasoning_out, music_out, music_out_2]
+        outputs_manual = [summary_out, summary_ctx, heatmap_manual, perception_out, fusion_out, reasoning_out, music_out, music_out_2]
 
         # ---------------- 自动模式的数据流 ----------------
         # 关键（本项目踩过的坑，见 README.md §6.0，勿改回）：
@@ -864,7 +937,7 @@ def build_ui():
         auto_cam.stream(
             fn=auto_step,
             inputs=[auto_cam, audio_buf, last_key, last_music_ts, session_label, reasoning_mode, speech_mode, music_duration, summary_lang],
-            outputs=outputs + [last_key, last_music_ts, audio_buf],
+            outputs=outputs_auto + [last_key, last_music_ts, audio_buf],
             stream_every=AUTO_INTERVAL_SEC,
             show_progress="hidden",
         )
@@ -872,7 +945,7 @@ def build_ui():
         # 手动模式（视频版）：
         #   结束录制(stop_recording) → 自动跑一次 pipeline；按钮 → 用当前视频重跑（可选）。
         # 输出比自动模式多一个「随机抽取的输入帧」预览(man_frame)。
-        video_outputs = outputs + [last_key, last_music_ts, man_frame]
+        video_outputs = outputs_manual + [last_key, last_music_ts, man_frame]
         man_video.stop_recording(
             fn=run_manual_video,
             inputs=[man_video, session_label, reasoning_mode, speech_mode, music_duration, summary_lang],
@@ -895,17 +968,15 @@ def build_ui():
         mode.change(fn=switch_mode, inputs=[mode],
                     outputs=[auto_group, manual_group])
 
-        footer_md = gr.Markdown(t0["footer"])
-
         # ---------------- 全 UI 语言切换 ----------------
         # 切语言：整体替换所有文字组件（label/info/choices/markdown/按钮/占位），
         # 并用上一次的 ctx 即时重写「给你的说明」（不重跑 pipeline）。
         # 单选框只换 choices 的显示文本、value 稳定，故下游解析逻辑完全不受影响。
         lang_targets = [
-            title_md, mode, session_label, reasoning_mode, speech_mode, music_duration,
-            summary_lang, auto_cam, auto_mic, auto_note_md, manual_note_md, man_video,
-            man_frame, run_btn, summary_out, heatmap_out, details_accordion,
-            perception_out, fusion_out, reasoning_out, music_out, music_out_2, footer_md,
+            title_md, mode, reasoning_mode, music_duration,
+            summary_lang, auto_cam, auto_mic, heatmap_auto, auto_note_md, manual_note_md, man_video,
+            man_frame, heatmap_manual, run_btn, summary_out, details_accordion,
+            perception_out, fusion_out, reasoning_out, music_out, music_out_2,
         ]
 
         def set_language(lang_val, ctx):
@@ -921,27 +992,25 @@ def build_ui():
             return [
                 gr.update(value=t["app_title"]),                                             # title_md
                 gr.update(choices=t["mode_choices"], label=t["mode_label"], info=t["mode_info"]),
-                gr.update(label=t["session_label_label"], info=t["session_label_info"]),
                 gr.update(choices=t["reasoning_choices"], label=t["reasoning_label"], info=t["reasoning_info"]),
-                gr.update(choices=t["speech_choices"], label=t["speech_label"], info=t["speech_info"]),
                 gr.update(label=t["duration_label"], info=t["duration_info"]),
                 gr.update(label=t["lang_label"], info=t["lang_info"]),                        # summary_lang
                 gr.update(label=t["auto_cam_label"]),
                 gr.update(label=t["auto_mic_label"]),
+                gr.update(label=t["heatmap_label"]),                                          # heatmap_auto
                 gr.update(value=t["auto_note"]),
                 gr.update(value=t["manual_note"]),
                 gr.update(label=t["man_video_label"]),
                 gr.update(label=t["man_frame_label"]),
+                gr.update(label=t["heatmap_label"]),                                          # heatmap_manual
                 gr.update(value=t["run_btn_label"]),
                 summary_update,                                                              # summary_out
-                gr.update(label=t["heatmap_label"]),
                 gr.update(label=t["accordion_label"]),
                 gr.update(label=t["perception_label"]),
                 gr.update(label=t["fusion_label"]),
                 gr.update(label=t["reasoning_out_label"]),
                 gr.update(label=t["music_label"]),
                 gr.update(label=t["music2_label"]),
-                gr.update(value=t["footer"]),
             ]
 
         summary_lang.change(fn=set_language, inputs=[summary_lang, summary_ctx], outputs=lang_targets)
