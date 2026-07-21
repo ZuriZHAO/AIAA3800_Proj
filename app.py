@@ -377,12 +377,14 @@ def _summary_head(state, lang="en"):
     if lang == "zh":
         emo_zh = _EMOTION_ZH.get(emo, emo)
         fat_zh = _FATIGUE_ZH.get(fat, fat)
-        hedge = "可能" if low else ""
-        return f"🙂 现在{hedge}检测到你的情绪偏「{emo_zh}」，疲劳程度{fat_zh}。"
+        if low:
+            return f"🌿 此刻的你，或许有一点「{emo_zh}」，疲劳程度大概是{fat_zh}。"
+        return f"🌿 此刻的你看起来有些「{emo_zh}」，疲劳程度{fat_zh}。"
     emo_en = _EMOTION_EN.get(emo, emo)
     fat_en = _FATIGUE_EN.get(fat, fat)
-    verb = "may be feeling" if low else "seem"
-    return f"🙂 Right now you {verb} {emo_en}, with {fat_en} fatigue."
+    if low:
+        return f"🌿 Right now, you might be feeling a little {emo_en}, with {fat_en} energy."
+    return f"🌿 Right now you seem {emo_en}, with {fat_en} fatigue."
 
 
 def _build_summary(ctx, lang="en"):
@@ -402,17 +404,17 @@ def _build_summary(ctx, lang="en"):
         style_b = _music_style(ctx.get("spec_std", ""), lang)
         if lang == "zh":
             return (_summary_head(state, "zh") + "\n"
-                    "🎵 这次生成了两段可对比的音乐：\n"
+                    "🎵 这次为你准备了两段音乐，可以静静对比一下：\n"
                     f"　· A（ToM+CoT）：{style_a}\n"
                     f"　· B（Standard）：{style_b}")
         return (_summary_head(state, "en") + "\n"
-                "🎵 Two versions to compare:\n"
+                "🎵 Two pieces for you this time — take a moment to compare:\n"
                 f"　· A (ToM+CoT): {style_a}\n"
                 f"　· B (Standard): {style_b}")
     style = _music_style(ctx.get("spec", ""), lang)
     if lang == "zh":
-        return _summary_head(state, "zh") + "\n" + f"🎵 为你推荐了一段{style}，希望能陪伴此刻的你。"
-    return _summary_head(state, "en") + "\n" + f"🎵 We've picked some {style} to keep you company right now."
+        return _summary_head(state, "zh") + "\n" + f"🎵 为你挑了一段{style}，愿它能陪伴此刻的你。"
+    return _summary_head(state, "en") + "\n" + f"🎵 Here's some {style}, chosen to keep you company right now."
 
 
 def _summary_text(ctx, lang="en"):
@@ -471,8 +473,10 @@ def _reason_and_compose(state, session_label=None, reasoning_mode="tom_cot", dur
         )
         ctx = {"both": False, "state": state, "spec": "", "need": None,
                "triage": triage, "user_text": user_text}
-        # 两个播放器都 gr.skip()：不推新音乐（保留当前 / 静默），即「暂停自动推送」。
-        return triage["care_message"], ctx, reasoning_text, gr.skip(), gr.skip()
+        # 显式停掉两个播放器（value=None）。播放器现在 loop=True 会无限循环，
+        # 若仍用 gr.skip()「保留当前」，高风险时旧音乐会一直响，违背「暂停推送」的本意。
+        return (triage["care_message"], ctx, reasoning_text,
+                gr.update(value=None), gr.update(value=None))
 
     text = str(reasoning_mode).lower()
 
@@ -553,89 +557,96 @@ def _texts():
     en = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### Real-time Music Companion with Multimodal Emotion Perception "
-            "— AIAA 3800 · HKUST(GZ)\n"
-            "We **perceive** your state (face + speech + fatigue), **reason** about "
-            "what you need, and **generate** music for this very moment."
+            "### Your real-time music companion — AIAA 3800 · HKUST(GZ)\n"
+            "We quietly read your face, voice, and energy level, then compose a piece of music "
+            "just for this moment. No input needed — just be yourself."
         ),
-        "mode_label": "Mode",
-        "mode_info": (f"Auto: camera & mic keep running; capture every {a}s, music stays on "
-                      "until you close the page. Manual: record a video, then process once."),
-        "mode_choices": [("Auto (continuous)", "auto"), ("Manual (one-shot)", "manual")],
-        "reasoning_label": "⑤ Reasoning mode",
-        "reasoning_info": ("ToM+CoT: two-stage reasoning (default). Standard: direct emotion→style "
-                           "baseline. Both: generate both, with a second player below."),
-        "reasoning_choices": [("ToM+CoT (default)", "tom_cot"),
-                              ("Standard (baseline)", "standard"),
-                              ("Both (both modes)", "both")],
-        "duration_label": "⑥ Music length (seconds)",
-        "duration_info": (f"Drag to choose the music length, 0–{mx}s; 0 = no music (silent). "
-                          "Longer = slower. Applies on the next run."),
+        "mode_label": "How would you like to use it?",
+        "mode_info": (f"Continuous: camera & mic stay on, music refreshes every {a}s as your mood shifts. "
+                      "One-shot: record a short clip and we'll read it once."),
+        "mode_choices": [("🔄  Continuous (always on)", "auto"), ("🎬  One-shot (record a clip)", "manual")],
+        "reasoning_label": "Reasoning mode",
+        "reasoning_info": ("ToM+CoT reads between the lines of your emotional state (recommended). "
+                           "Standard maps emotion directly to style. Both runs both and lets you compare."),
+        "reasoning_choices": [("✨  ToM+CoT — reads between the lines (recommended)", "tom_cot"),
+                              ("⚡  Standard — direct mapping (baseline)", "standard"),
+                              ("🔬  Both — compare the two", "both")],
+        "duration_label": "Music length",
+        "duration_info": (f"How long should the piece be? 0–{mx}s. Longer takes more time to generate. "
+                          "Takes effect on the next run."),
         "lang_label": "🌐 Language",
-        "lang_info": ("Switch the whole interface and the message for you between English and "
-                      "Chinese. Applies instantly."),
+        "lang_info": "Switch the whole interface and your personal note between English and Chinese.",
         "lang_choices": [("English", "en"), ("中文", "zh")],
-        "auto_cam_label": f"📷 Live camera (auto-captured every {a}s)",
-        "auto_mic_label": "🎙️ Live microphone (recording continuously)",
-        "auto_note": (f"> Auto mode is **on**. The pipeline runs every {a}s. "
-                      "Music only changes when emotion or fatigue changes."),
-        "manual_note": ("> Manual mode (video): click **● Record** on the video box, record a clip, "
-                        "then click **■ Stop**. On stop we automatically sample a frame as the face "
-                        "image and split the audio as speech, then run the full pipeline."),
-        "man_video_label": "🎥 Record video (with audio)",
-        "man_frame_label": "🖼️ Sampled frame",
-        "run_btn_label": "▶ Reprocess current video (optional)",
-        "summary_label": "💬 For you",
-        "summary_placeholder": ("After a run, this tells you in plain words how you seem and "
-                                "what music we picked."),
-        "heatmap_label": "⑦ GradCAM facial heatmap",
-        "accordion_label": "🔎 Details (①②③ perception / ④ fusion / ⑤ reasoning)",
-        "perception_label": "①②③ Perception output",
-        "fusion_label": "④ Multimodal fusion · unified state JSON",
-        "reasoning_out_label": "⑤ LLM need inference (ToM + CoT) · live status",
-        "music_label": "⑥ Music companion (auto-plays)",
-        "music2_label": "⑥-B Music · (second clip, Both mode)",
+        "auto_cam_label": f"📷 Camera — captured every {a}s",
+        "auto_mic_label": "🎙️ Microphone — listening",
+        "auto_media_acc_label": "📹 Live view & attention map (click to hide)",
+        "auto_note": (f"> Continuous mode is **on**. EmotiCompanion checks in every {a}s. "
+                      "The music **loops seamlessly** — it keeps playing while the next piece "
+                      "is being composed, and only switches when your mood shifts."),
+        "manual_note": ("> **How to use:** tap **● Record** on the video box below, "
+                        "say a few words or just sit naturally for a moment, then tap **■ Stop**. "
+                        "We'll pick a frame as your face snapshot and separate the audio — "
+                        "then the full analysis runs automatically."),
+        "man_video_label": "🎥 Record a short clip",
+        "man_frame_label": "🖼️ Face snapshot (auto-sampled)",
+        "manual_media_acc_label": "📹 Recording & attention map (click to hide)",
+        "run_btn_label": "↺  Re-analyse the same clip",
+        "summary_label": "✨ A note just for you",
+        "summary_placeholder": ("Once the analysis runs, you'll see a warm, plain-language note here — "
+                                "what we sensed about your mood and energy, and what music we chose for you."),
+        "heatmap_label": "Attention map (GradCAM)",
+        "accordion_label": "🔬 Under the hood — perception · fusion · reasoning",
+        "perception_label": "Raw perception  ①②③",
+        "fusion_label": "Fused state  ④",
+        "reasoning_out_label": "LLM reasoning chain  ⑤",
+        "music_label": "🎵 Your music companion",
+        "music2_label": "🎵 Companion B  (Both mode)",
     }
     zh = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### 多模态情绪感知实时音乐陪伴 — AIAA 3800 · 香港科技大学（广州）\n"
-            "我们**感知**你的状态（人脸 + 语音 + 疲劳），**推理**你此刻的需要，"
-            "并为这一刻**生成**音乐。"
+            "### 你的实时情绪音乐陪伴 — AIAA 3800 · 香港科技大学（广州）\n"
+            "我们轻轻感知你的表情、声音和疲劳状态，为此刻的你即兴创作一段音乐。"
+            "不需要任何操作，做自己就好。"
         ),
-        "mode_label": "模式",
-        "mode_info": (f"自动：摄像头/麦克风持续工作，每 {a} 秒捕捉一次，音乐一直陪伴直到关闭网页。"
-                      "手动：录一段视频再处理一次。"),
-        "mode_choices": [("自动（持续）", "auto"), ("手动（单次）", "manual")],
-        "reasoning_label": "⑤ 推理模式",
-        "reasoning_info": ("ToM+CoT：两段式推理（默认）。Standard：情绪→曲风直接查表基线。"
-                           "Both：两种都生成，下方出现第二个播放器。"),
-        "reasoning_choices": [("ToM+CoT（默认）", "tom_cot"),
-                              ("Standard（基线）", "standard"),
-                              ("Both（两种都生成）", "both")],
-        "duration_label": "⑥ 音乐长度（秒）",
-        "duration_info": (f"拖动选择生成音乐的时长，0~{mx}s；0=不生成（静音）。越长越慢，下一次运行生效。"),
+        "mode_label": "你想怎么使用？",
+        "mode_info": (f"持续模式：摄像头和麦克风保持开启，每 {a} 秒感知一次，情绪变化时音乐随之更新。"
+                      "单次模式：录一段短视频，我们读取一次。"),
+        "mode_choices": [("🔄  持续陪伴（一直开着）", "auto"), ("🎬  单次体验（录一段）", "manual")],
+        "reasoning_label": "推理方式",
+        "reasoning_info": ("ToM+CoT 会读懂情绪背后的深层需求（推荐）。"
+                           "Standard 直接把情绪映射到曲风。Both 两种都跑，可以对比。"),
+        "reasoning_choices": [("✨  ToM+CoT — 读懂你的深层需求（推荐）", "tom_cot"),
+                              ("⚡  Standard — 直接映射（基线）", "standard"),
+                              ("🔬  Both — 两种都生成，对比看看", "both")],
+        "duration_label": "音乐时长",
+        "duration_info": (f"这段音乐生成多长？0~{mx}s。越长生成越慢，下一次运行生效。"),
         "lang_label": "🌐 语言",
-        "lang_info": "在中/英之间切换整个界面和「给你的说明」；立即生效。",
+        "lang_info": "在中/英之间切换整个界面和给你的便签，立即生效。",
         "lang_choices": [("English", "en"), ("中文", "zh")],
-        "auto_cam_label": f"📷 实时摄像头（每 {a} 秒自动捕捉）",
-        "auto_mic_label": "🎙️ 实时麦克风（持续录音）",
-        "auto_note": (f"> 自动模式**已开启**。每 {a} 秒跑一次 pipeline。"
-                      "只有情绪或疲劳变化时才更换音乐。"),
-        "manual_note": ("> 手动模式（视频）：点击视频框的 **● 录制** 开始，录一段后点 **■ 停止**。"
-                        "停止后会**自动**从视频随机抽一帧当人脸图像、分离音频当语音，直接跑完整 pipeline。"),
-        "man_video_label": "🎥 录制视频（含音频）",
-        "man_frame_label": "🖼️ 随机抽取的输入帧",
-        "run_btn_label": "▶ 重新处理当前视频（可选）",
-        "summary_label": "💬 给你的说明",
-        "summary_placeholder": "运行后这里会用大白话告诉你现在的情绪/疲劳，以及为你推荐了什么音乐。",
-        "heatmap_label": "⑦ GradCAM 人脸热力图",
-        "accordion_label": "🔎 详细中间输出（①②③ 感知 / ④ 融合 / ⑤ 推理）",
-        "perception_label": "①②③ 感知输出",
-        "fusion_label": "④ 多模态融合 · 统一状态 JSON",
-        "reasoning_out_label": "⑤ LLM 需求推理（ToM + CoT）· 实时状态",
-        "music_label": "⑥ 音乐陪伴（自动播放）",
-        "music2_label": "⑥-B 音乐 · (Both 模式第二段)",
+        "auto_cam_label": f"📷 摄像头 — 每 {a} 秒捕捉一次",
+        "auto_mic_label": "🎙️ 麦克风 — 持续聆听",
+        "auto_media_acc_label": "📹 实时画面与热力图（点击可收起）",
+        "auto_note": (f"> 持续模式**已开启**。EmotiCompanion 每 {a} 秒悄悄感知一次。"
+                      "音乐**循环不间断**——下一段还在创作时当前音乐持续播放，"
+                      "只有情绪或疲劳变化时才悄悄换成新的。"),
+        "manual_note": ("> **使用方法：** 点击下方视频框的 **● 录制**，"
+                        "说几句话或自然地坐一会儿，再点 **■ 停止**。"
+                        "我们会自动抽取一帧作为人脸快照、分离音频，然后完整分析自动开始。"),
+        "man_video_label": "🎥 录一段短视频",
+        "man_frame_label": "🖼️ 人脸快照（自动抽取）",
+        "manual_media_acc_label": "📹 录制画面与热力图（点击可收起）",
+        "run_btn_label": "↺  重新分析这段视频",
+        "summary_label": "✨ 写给你的便签",
+        "summary_placeholder": ("分析完成后，这里会出现一段温柔的话——"
+                                "告诉你我们感知到了什么情绪和疲劳状态，以及为你选了什么样的音乐陪伴。"),
+        "heatmap_label": "注意力热力图（GradCAM）",
+        "accordion_label": "🔬 技术细节 — 感知 · 融合 · 推理",
+        "perception_label": "原始感知输出  ①②③",
+        "fusion_label": "多模态融合状态  ④",
+        "reasoning_out_label": "LLM 推理链  ⑤",
+        "music_label": "🎵 此刻的旋律",
+        "music2_label": "🎵 旋律 B（Both 模式）",
     }
     return {"en": en, "zh": zh}
 
@@ -836,12 +847,208 @@ def buffer_to_wav(buffer):
 # Gradio UI
 # =============================================================================
 
+# ---- 视觉包装（主题 + 自定义 CSS）：只影响外观，不触碰任何 pipeline / 回调逻辑 ----
+# 设计语言：柔和极光渐变背景 + 玻璃拟态卡片 + 流动渐变主视觉，
+# 呼应「情绪陪伴音乐」的治愈系气质（紫 → 粉 → 蓝）；自动适配明/暗色模式。
+EMOTI_THEME = gr.themes.Soft(
+    primary_hue=gr.themes.colors.violet,
+    secondary_hue=gr.themes.colors.pink,
+    neutral_hue=gr.themes.colors.slate,
+    radius_size=gr.themes.sizes.radius_lg,
+    font=[gr.themes.GoogleFont("Outfit"), gr.themes.GoogleFont("Noto Sans SC"),
+          "system-ui", "sans-serif"],
+)
+
+EMOTI_CSS = """
+/* ================= EmotiCompanion · Aurora Glass ================= */
+* { -webkit-font-smoothing: antialiased; }
+footer { display: none !important; }        /* 隐藏 gradio 默认页脚 */
+
+/* ---------- 页面底色 ---------- */
+body, .gradio-container {
+    background: linear-gradient(180deg, #f7f5ff 0%, #fdf4fa 55%, #f2f8ff 100%) !important;
+}
+.dark body, .dark .gradio-container {
+    background: linear-gradient(180deg, #131020 0%, #1a1226 55%, #10131f 100%) !important;
+}
+.gradio-container { max-width: 1140px !important; margin: 0 auto !important; position: relative; }
+/* 让内容层始终盖在装饰光斑之上 */
+.gradio-container > * { position: relative; z-index: 1; }
+
+/* ---------- 两团缓慢漂移的极光光斑（固定，不随滚动） ---------- */
+.gradio-container::before, .gradio-container::after {
+    content: "";
+    position: fixed;
+    width: 60vmax; height: 60vmax;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: .5;
+    z-index: 0;
+    pointer-events: none;
+}
+.gradio-container::before {
+    background: radial-gradient(circle at 30% 30%, rgba(139,120,255,.38), rgba(255,126,179,.20) 55%, transparent 72%);
+    top: -22vmax; left: -18vmax;
+    animation: emoti-drift-a 26s ease-in-out infinite alternate;
+}
+.gradio-container::after {
+    background: radial-gradient(circle at 70% 70%, rgba(96,165,250,.32), rgba(192,93,240,.18) 55%, transparent 72%);
+    bottom: -24vmax; right: -20vmax;
+    animation: emoti-drift-b 32s ease-in-out infinite alternate;
+}
+.dark .gradio-container::before, .dark .gradio-container::after { opacity: .38; }
+@keyframes emoti-drift-a { from { transform: translate(0,0) scale(1); }    to { transform: translate(9vmax,6vmax) scale(1.15); } }
+@keyframes emoti-drift-b { from { transform: translate(0,0) scale(1.1); }  to { transform: translate(-8vmax,-7vmax) scale(.95); } }
+
+/* ---------- 细腻胶片噪点，压住渐变的塑料感 ---------- */
+body::after {
+    content: ""; position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    opacity: .035; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- 主视觉：流动渐变横幅 + 漂浮音符 ---------- */
+#emoti-hero {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(120deg, #6d5dfc, #a45de2, #ff7eb3, #5da9fc, #6d5dfc);
+    background-size: 340% 340%;
+    animation: emoti-flow 16s ease infinite;
+    border-radius: 28px;
+    padding: 46px 40px 38px;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(109,93,252,.30), inset 0 1px 0 rgba(255,255,255,.35);
+    margin-bottom: 4px;
+}
+@keyframes emoti-flow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+#emoti-hero::before, #emoti-hero::after {   /* 漂浮的音符装饰 */
+    position: absolute; color: rgba(255,255,255,.30); pointer-events: none; z-index: 0;
+}
+#emoti-hero::before { content: "♪"; font-size: 3.4rem; left: 7%;  top: 16%;
+                      animation: emoti-float 7s ease-in-out infinite; }
+#emoti-hero::after  { content: "♫"; font-size: 2.6rem; right: 8%; bottom: 14%;
+                      animation: emoti-float 9s ease-in-out 1.2s infinite; }
+@keyframes emoti-float { 0%,100% { transform: translateY(0) rotate(-6deg); }
+                         50%     { transform: translateY(-14px) rotate(8deg); } }
+#emoti-hero h1 { color: #fff !important; font-size: 2.6rem; font-weight: 700;
+                 letter-spacing: .04em; margin: 0 0 .2em;
+                 text-shadow: 0 2px 16px rgba(0,0,0,.20); }
+#emoti-hero h3 { color: rgba(255,255,255,.95) !important; font-weight: 500;
+                 font-size: 1.25rem; margin: 0 0 .6em; letter-spacing: .02em; }
+#emoti-hero p, #emoti-hero li { color: rgba(255,255,255,.90) !important;
+                 max-width: 640px; margin: .35em auto 0; font-size: 1.04rem; line-height: 1.8; }
+#emoti-hero em { color: rgba(255,255,255,.75) !important; font-size: .9rem; }
+#emoti-hero strong { color: #fff !important; }
+
+/* ---------- 玻璃拟态卡片 ---------- */
+.emoti-card {
+    background: rgba(255, 255, 255, .58) !important;
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    border: 1px solid rgba(255, 255, 255, .80) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 12px 32px rgba(92, 80, 180, .10) !important;
+    padding: 12px !important;
+}
+.dark .emoti-card {
+    background: rgba(255, 255, 255, .05) !important;
+    border-color: rgba(255, 255, 255, .09) !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .32) !important;
+}
+.emoti-card .block, .emoti-card .form {
+    background: transparent !important; border: none !important; box-shadow: none !important;
+}
+.emoti-card img, .emoti-card video { border-radius: 16px !important; }
+.emoti-controls { gap: 14px !important; }
+
+/* ---------- 「给你的便签」：流光渐变描边 + 信纸质感（视觉主角一号） ---------- */
+#emoti-summary {
+    border: 2px solid transparent !important;
+    border-radius: 24px !important;
+    background:
+        linear-gradient(rgba(255,255,255,.94), rgba(255,255,255,.94)) padding-box,
+        linear-gradient(120deg, #8b78ff, #ff7eb3, #60a5fa, #8b78ff) border-box !important;
+    background-size: 100% 100%, 300% 300% !important;
+    animation: emoti-border 10s linear infinite;
+    box-shadow: 0 16px 38px rgba(124, 107, 255, .16) !important;
+    padding: 6px 10px !important;
+}
+.dark #emoti-summary {
+    background:
+        linear-gradient(rgba(26,20,38,.94), rgba(26,20,38,.94)) padding-box,
+        linear-gradient(120deg, #8b78ff, #ff7eb3, #60a5fa, #8b78ff) border-box !important;
+    background-size: 100% 100%, 300% 300% !important;
+}
+@keyframes emoti-border { 0% { background-position: 0 0, 0% 50%; } 100% { background-position: 0 0, 300% 50%; } }
+#emoti-summary textarea {
+    background: transparent !important; border: none !important;
+    font-size: 1.14rem !important; line-height: 2.0 !important;
+}
+#emoti-summary label span { font-size: 1.05rem !important; font-weight: 700 !important;
+                            letter-spacing: .02em; }
+
+/* ---------- 「此刻的旋律」：呼吸光晕（视觉主角二号） ---------- */
+#emoti-music {
+    border-radius: 24px !important;
+    animation: emoti-breathe 5.5s ease-in-out infinite;
+}
+@keyframes emoti-breathe {
+    0%, 100% { box-shadow: 0 12px 32px rgba(109, 93, 252, .16); }
+    50%      { box-shadow: 0 12px 48px rgba(255, 126, 179, .32); }
+}
+#emoti-music label span { font-size: 1.02rem !important; font-weight: 700 !important; }
+
+/* ---------- 主按钮：渐变 + 悬浮流光扫过 ---------- */
+#emoti-run-btn {
+    position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #7c6bff 0%, #c05df0 55%, #ff7eb3 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 16px !important;
+    font-weight: 600; font-size: 1.02rem; letter-spacing: .04em;
+    padding: 12px 18px !important;
+    box-shadow: 0 10px 26px rgba(150, 90, 240, .34);
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+#emoti-run-btn::after {                     /* 流光扫过 */
+    content: ""; position: absolute; top: 0; left: -80%;
+    width: 50%; height: 100%;
+    background: linear-gradient(105deg, transparent, rgba(255,255,255,.45), transparent);
+    transform: skewX(-20deg);
+    transition: left .5s ease;
+}
+#emoti-run-btn:hover { transform: translateY(-2px);
+                       box-shadow: 0 16px 34px rgba(150, 90, 240, .46); }
+#emoti-run-btn:hover::after { left: 130%; }
+#emoti-run-btn:active { transform: translateY(0); }
+
+/* ---------- 底部研究/调试折叠区：刻意弱化，让给主角 ---------- */
+#emoti-details {
+    border-radius: 18px !important;
+    border: 1px dashed rgba(124, 107, 255, .28) !important;
+    background: rgba(255, 255, 255, .30) !important;
+    opacity: .82;
+    transition: opacity .2s ease;
+    margin-top: 6px;
+}
+#emoti-details:hover { opacity: 1; }
+.dark #emoti-details { background: rgba(255, 255, 255, .03) !important; }
+#emoti-details .label-wrap span { font-size: .92rem !important; opacity: .85; }
+
+/* ---------- 提示文字与滚动条细节 ---------- */
+#emoti-note-auto p, #emoti-note-manual p { opacity: .82; font-size: .96rem; line-height: 1.8; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: rgba(124,107,255,.30); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(124,107,255,.50); }
+"""
+
+
 def build_ui():
     with gr.Blocks(title="EmotiCompanion") as demo:
         T = _texts()
         t0 = T["en"]   # 初始英文；切换语言时由 set_language 整体替换
 
-        title_md = gr.Markdown(t0["app_title"])
+        title_md = gr.Markdown(t0["app_title"], elem_id="emoti-hero")
 
         # 跨回调共享的会话状态
         last_key = gr.State(None)    # 上一次的 (emotion, fatigue)，用于判断是否换音乐
@@ -849,65 +1056,79 @@ def build_ui():
         audio_buf = gr.State([])     # 麦克风流式音频缓冲（numpy chunk 列表）
         summary_ctx = gr.State(None) # 上一次摘要的最小上下文，切语言时即时重刷用
 
-        # 单选框统一用 (显示文本, 稳定值)：显示随语言变，value 恒定，所有解析逻辑不受影响。
-        mode = gr.Radio(t0["mode_choices"], value="manual",
-                        label=t0["mode_label"], info=t0["mode_info"])
+        # ---------------- 控制区（卡片包装）----------------
+        # 只放用户真正会关心的三项：使用方式 / 音乐时长 / 语言。
+        # 「推理模式」偏研究对比，移到底部技术折叠区，避免干扰普通用户。
+        with gr.Group(elem_classes=["emoti-card"]):
+            with gr.Row(elem_classes=["emoti-controls"]):
+                # 单选框统一用 (显示文本, 稳定值)：显示随语言变，value 恒定，所有解析逻辑不受影响。
+                mode = gr.Radio(t0["mode_choices"], value="manual",
+                                label=t0["mode_label"], info=t0["mode_info"])
+
+                # 全局语言开关：默认英文，选中文后整个界面 + 给用户的话 + 标签都变中文（立即生效）。
+                summary_lang = gr.Radio(t0["lang_choices"], value="en",
+                                        label=t0["lang_label"], info=t0["lang_info"])
+
+            music_duration = gr.Slider(
+                minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
+                value=MUSIC_DEFAULT_DURATION_SEC,
+                label=t0["duration_label"], info=t0["duration_info"])
 
         # 会话标签与语音后端不再作为可见控件：固定为 test / 环境默认，用隐藏 State 承载，
         # 保持各回调 inputs 的位置不变（值照常流入函数）。
         session_label = gr.State("test")
-
-        reasoning_mode = gr.Radio(t0["reasoning_choices"], value="tom_cot",
-                                  label=t0["reasoning_label"], info=t0["reasoning_info"])
-
         speech_mode = gr.State(_speech_mode_value_from_env())
 
-        music_duration = gr.Slider(
-            minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
-            value=MUSIC_DEFAULT_DURATION_SEC,
-            label=t0["duration_label"], info=t0["duration_info"])
-
-        # 全局语言开关：默认英文，选中文后整个界面 + 给用户的话 + 标签都变中文（立即生效）。
-        summary_lang = gr.Radio(t0["lang_choices"], value="en",
-                                label=t0["lang_label"], info=t0["lang_info"])
-
         # ---------------- 自动模式区 ----------------
-        with gr.Group(visible=False) as auto_group:
+        with gr.Group(visible=False, elem_classes=["emoti-card"]) as auto_group:
             # 摄像头 · 麦克风 · ⑦ GradCAM 热力图 并排（统一缩小）。
-            with gr.Row(equal_height=True):
-                auto_cam = gr.Image(label=t0["auto_cam_label"],
-                                    type="numpy", sources=["webcam"], streaming=True, height=240)
-                auto_mic = gr.Audio(label=t0["auto_mic_label"],
-                                    type="numpy", sources=["microphone"], streaming=True)
-                heatmap_auto = gr.Image(label=t0["heatmap_label"], height=240)
-            auto_note_md = gr.Markdown(t0["auto_note"])
+            # 包在默认展开的 Accordion 里：不想看到画面时可点标题收起（采集照常进行）。
+            with gr.Accordion(t0["auto_media_acc_label"], open=True) as auto_media_acc:
+                with gr.Row(equal_height=True):
+                    auto_cam = gr.Image(label=t0["auto_cam_label"],
+                                        type="numpy", sources=["webcam"], streaming=True, height=240)
+                    auto_mic = gr.Audio(label=t0["auto_mic_label"],
+                                        type="numpy", sources=["microphone"], streaming=True)
+                    heatmap_auto = gr.Image(label=t0["heatmap_label"], height=240)
+            auto_note_md = gr.Markdown(t0["auto_note"], elem_id="emoti-note-auto")
 
         # ---------------- 手动模式区（视频版：录制 → 抽帧+分离音频 → 单次 pipeline）----------------
-        with gr.Group(visible=True) as manual_group:
-            manual_note_md = gr.Markdown(t0["manual_note"])
+        with gr.Group(visible=True, elem_classes=["emoti-card"]) as manual_group:
+            manual_note_md = gr.Markdown(t0["manual_note"], elem_id="emoti-note-manual")
             # 录制视频 · 随机抽取的输入帧 · ⑦ GradCAM 热力图 并排（统一缩小，避免过于突兀）。
-            with gr.Row(equal_height=True):
-                man_video = gr.Video(label=t0["man_video_label"],
-                                     sources=["webcam"], include_audio=True, height=240,
-                                     webcam_options=gr.WebcamOptions(mirror=False))
-                man_frame = gr.Image(label=t0["man_frame_label"], type="numpy", height=240)
-                heatmap_manual = gr.Image(label=t0["heatmap_label"], height=240)
-            run_btn = gr.Button(t0["run_btn_label"], variant="primary")
+            # 同样包在默认展开的 Accordion 里，可随时收起。
+            with gr.Accordion(t0["manual_media_acc_label"], open=True) as manual_media_acc:
+                with gr.Row(equal_height=True):
+                    man_video = gr.Video(label=t0["man_video_label"],
+                                         sources=["webcam"], include_audio=True, height=240,
+                                         webcam_options=gr.WebcamOptions(mirror=False))
+                    man_frame = gr.Image(label=t0["man_frame_label"], type="numpy", height=240)
+                    heatmap_manual = gr.Image(label=t0["heatmap_label"], height=240)
+            run_btn = gr.Button(t0["run_btn_label"], variant="primary", elem_id="emoti-run-btn")
 
         # ---------------- 输出区（两模式共用）----------------
         # 面向用户的友好摘要：由大模型生成（未配置 LLM 后端时回退模板），显眼常显。
         summary_out = gr.Textbox(label=t0["summary_label"], lines=3, interactive=False,
-                                 placeholder=t0["summary_placeholder"])
+                                 placeholder=t0["summary_placeholder"],
+                                 elem_id="emoti-summary")
 
         # 中间产物（①②③ 感知 / ④ 融合 / ⑤ 推理）默认收起：一般用户不需要看，需要时展开。
-        with gr.Accordion(t0["accordion_label"], open=False) as details_accordion:
+        # 「推理模式」也一并放进来——它偏研究对比，普通用户用默认即可。
+        with gr.Accordion(t0["accordion_label"], open=False,
+                          elem_id="emoti-details") as details_accordion:
+            reasoning_mode = gr.Radio(t0["reasoning_choices"], value="tom_cot",
+                                      label=t0["reasoning_label"], info=t0["reasoning_info"])
             perception_out = gr.Code(label=t0["perception_label"], language="json")
             fusion_out = gr.Code(label=t0["fusion_label"], language="json")
             reasoning_out = gr.Textbox(label=t0["reasoning_out_label"], lines=8)
 
-        music_out = gr.Audio(label=t0["music_label"], autoplay=True)
-        # 第二个播放器：只在 Both 模式出现，默认隐藏；不 autoplay，避免与上面重叠出声。
-        music_out_2 = gr.Audio(label=t0["music2_label"], autoplay=False, visible=False)
+        with gr.Group(elem_classes=["emoti-card"], elem_id="emoti-music"):
+            # loop=True：一段播完自动从头重播 → 自动模式下「音乐不断」。
+            # 下一段还在生成时旧的一直循环；新音乐推过来时播放器自动换成新的。
+            # 状态不变被跳过（gr.skip()）时播放器不被触碰，循环也不中断。
+            music_out = gr.Audio(label=t0["music_label"], autoplay=True, loop=True)
+            # 第二个播放器：只在 Both 模式出现，默认隐藏；不 autoplay，避免与上面重叠出声。
+            music_out_2 = gr.Audio(label=t0["music2_label"], autoplay=False, visible=False)
 
         # 输出列表按模式区分 heatmap 目标：auto_step 的热力图刷到自动组里的 heatmap_auto，
         # run_manual_video 的刷到手动组里的 heatmap_manual（其余位置完全一致）。
@@ -934,11 +1155,15 @@ def build_ui():
 
         # 摄像头：每 AUTO_INTERVAL_SEC 秒把最新帧直接送进 auto_step 跑完整 pipeline，
         # 并带上累积的 audio_buf 与上一轮 last_key；auto_step 跑完会清空 audio_buf。
+        # trigger_mode="always_last"：pipeline（LLM+音乐生成）一次要几十秒，远超推流
+        # 间隔，事件会在队列里堆积、越跑越滞后；always_last 让堆积时只保留最新一次
+        # 触发，跑完当前立刻处理「最新帧」，不追旧账。
         auto_cam.stream(
             fn=auto_step,
             inputs=[auto_cam, audio_buf, last_key, last_music_ts, session_label, reasoning_mode, speech_mode, music_duration, summary_lang],
             outputs=outputs_auto + [last_key, last_music_ts, audio_buf],
             stream_every=AUTO_INTERVAL_SEC,
+            trigger_mode="always_last",
             show_progress="hidden",
         )
 
@@ -977,6 +1202,7 @@ def build_ui():
             summary_lang, auto_cam, auto_mic, heatmap_auto, auto_note_md, manual_note_md, man_video,
             man_frame, heatmap_manual, run_btn, summary_out, details_accordion,
             perception_out, fusion_out, reasoning_out, music_out, music_out_2,
+            auto_media_acc, manual_media_acc,
         ]
 
         def set_language(lang_val, ctx):
@@ -1011,6 +1237,8 @@ def build_ui():
                 gr.update(label=t["reasoning_out_label"]),
                 gr.update(label=t["music_label"]),
                 gr.update(label=t["music2_label"]),
+                gr.update(label=t["auto_media_acc_label"]),                                   # auto_media_acc
+                gr.update(label=t["manual_media_acc_label"]),                                 # manual_media_acc
             ]
 
         summary_lang.change(fn=set_language, inputs=[summary_lang, summary_ctx], outputs=lang_targets)
@@ -1023,4 +1251,5 @@ if __name__ == "__main__":
     print("EmotiCompanion module loading status:")
     print("=" * 60)
     app = build_ui()
-    app.launch()
+    # Gradio 6.x：theme / css 从 Blocks 构造器移到了 launch()（只影响外观包装）。
+    app.launch(theme=EMOTI_THEME, css=EMOTI_CSS)
