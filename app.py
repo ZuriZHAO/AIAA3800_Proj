@@ -850,10 +850,158 @@ def buffer_to_wav(buffer):
 # ---- 视觉包装（主题 + 自定义 CSS）：只影响外观，不触碰任何 pipeline / 回调逻辑 ----
 # 设计语言：柔和极光渐变背景 + 玻璃拟态卡片 + 流动渐变主视觉，
 # 呼应「情绪陪伴音乐」的治愈系气质（紫 → 粉 → 蓝）；自动适配明/暗色模式。
+# 右下角陪伴小精灵：内嵌 SVG，表情部件按 data-mood 显隐（CSS 控制），随情绪切换。
+BUDDY_HTML = """
+<div id="emoti-buddy" data-mood="neutral" title="EmotiBuddy · 点我说句话">
+  <div id="buddy-speech" class="buddy-speech"></div>
+  <div class="buddy-bob">
+  <svg viewBox="0 0 150 178" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="buddyFur" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#b98a56"/>
+        <stop offset="1" stop-color="#8f5e33"/>
+      </linearGradient>
+    </defs>
+    <!-- 落地阴影 -->
+    <ellipse cx="75" cy="172" rx="42" ry="6" fill="rgba(46,30,15,.20)"/>
+    <!-- 毛茸茸尾巴（藏在身体后） -->
+    <ellipse cx="121" cy="132" rx="14" ry="20" fill="#8f5e33" transform="rotate(38 121 132)"/>
+    <ellipse cx="131" cy="118" rx="7" ry="8" fill="#F7F1DE" transform="rotate(38 131 118)"/>
+    <!-- 身体 -->
+    <path d="M75 90 C104 90 117 111 117 137 C117 160 99 171 75 171 C51 171 33 160 33 137 C33 111 46 90 75 90 Z" fill="url(#buddyFur)"/>
+    <ellipse cx="75" cy="141" rx="23" ry="27" fill="#F7F1DE"/>
+    <!-- 小脚 -->
+    <ellipse cx="59" cy="168" rx="12" ry="8" fill="#7d5029"/>
+    <ellipse cx="91" cy="168" rx="12" ry="8" fill="#7d5029"/>
+    <!-- 圆耳朵 -->
+    <circle cx="41" cy="29" r="19" fill="url(#buddyFur)"/>
+    <circle cx="109" cy="29" r="19" fill="url(#buddyFur)"/>
+    <circle cx="41" cy="30" r="10" fill="#e9cfa6"/>
+    <circle cx="109" cy="30" r="10" fill="#e9cfa6"/>
+    <!-- 大头 -->
+    <circle cx="75" cy="57" r="47" fill="url(#buddyFur)"/>
+    <!-- 头顶音符天线（森林绿，呼应音乐） -->
+    <line x1="75" y1="10" x2="75" y2="1" stroke="#0D530E" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="75" cy="1" r="4.5" fill="#306D29"/>
+    <!-- 浅色口鼻区 -->
+    <ellipse cx="75" cy="72" rx="25" ry="20" fill="#F7F1DE"/>
+    <!-- 腮红 -->
+    <ellipse class="cheek" cx="45" cy="70" rx="8" ry="5" fill="rgba(224,122,95,.42)"/>
+    <ellipse class="cheek" cx="105" cy="70" rx="8" ry="5" fill="rgba(224,122,95,.42)"/>
+    <!-- 眼睛：普通 -->
+    <g class="eyes-open">
+      <circle cx="57" cy="58" r="6.5" fill="#3a2414"/>
+      <circle cx="93" cy="58" r="6.5" fill="#3a2414"/>
+      <circle cx="59" cy="56" r="2" fill="#fff"/>
+      <circle cx="95" cy="56" r="2" fill="#fff"/>
+    </g>
+    <!-- 眼睛：弯（happy） -->
+    <g class="eyes-happy">
+      <path d="M49 60 Q57 51 65 60" stroke="#3a2414" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+      <path d="M85 60 Q93 51 101 60" stroke="#3a2414" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+    </g>
+    <!-- 眉（serious） -->
+    <g class="brow-serious">
+      <path d="M49 47 L64 52" stroke="#3a2414" stroke-width="3" stroke-linecap="round"/>
+      <path d="M101 47 L86 52" stroke="#3a2414" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <!-- 鼻子 -->
+    <ellipse cx="75" cy="74" rx="5.5" ry="4" fill="#4E220F"/>
+    <!-- 嘴（按情绪切换） -->
+    <path class="mouth mouth-neutral" d="M67 84 Q75 90 83 84" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+    <path class="mouth mouth-happy" d="M62 82 Q75 99 88 82" stroke="#4E220F" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path class="mouth mouth-sad" d="M66 92 Q75 84 84 92" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+    <ellipse class="mouth mouth-surprise" cx="75" cy="88" rx="6" ry="8" fill="#4E220F"/>
+    <path class="mouth mouth-serious" d="M66 88 L84 88" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+    <!-- 泪滴 -->
+    <path class="tear" d="M53 64 q-4 8 0 12 q4 -4 0 -12 Z" fill="#5aa9d6"/>
+  </svg>
+  </div>
+  <div class="buddy-name">EmotiBuddy</div>
+</div>
+"""
+
+# 表情联动（纯前端，零改 pipeline）：监听 ④ 融合 JSON 里的 dominant_emotion → 切小精灵表情；
+# 「给你的话」有新内容时让它弹一下（像在说话）。经 demo.load 在页面加载时启动。
+BUDDY_JS = """
+() => {
+  const MAP = { happy:'happy', sad:'sad', fear:'sad', surprise:'surprise',
+                angry:'serious', disgust:'serious', neutral:'neutral' };
+  const buddy = document.getElementById('emoti-buddy');
+  if (!buddy) return;
+  const setMood = (txt) => {
+    if (!txt) return;
+    const m = txt.match(/"dominant_emotion"\\s*:\\s*"([a-zA-Z]+)"/);
+    if (m) buddy.setAttribute('data-mood', MAP[m[1].toLowerCase()] || 'neutral');
+  };
+  const fus = document.getElementById('emoti-fusion');
+  if (fus) {
+    const ob = new MutationObserver(() => setMood(fus.textContent || ''));
+    ob.observe(fus, { childList: true, subtree: true, characterData: true });
+    setMood(fus.textContent || '');
+  }
+  const sumEl = document.querySelector('#emoti-summary textarea');
+  if (sumEl) {
+    let last = sumEl.value;
+    setInterval(() => {
+      if (sumEl.value !== last && sumEl.value.trim()) {
+        last = sumEl.value;
+        buddy.classList.add('buddy-speak');
+        setTimeout(() => buddy.classList.remove('buddy-speak'), 1100);
+      }
+    }, 600);
+  }
+
+  // 点击小精灵 → 随机说一句治愈的话（中/英按界面语言，避免连续重复）
+  const HEAL_ZH = [
+    '没关系的，慢慢来，我一直在这儿。',
+    '今天辛苦了，给自己一个温柔的拥抱吧。',
+    '深呼吸——这一刻，你是安全的。',
+    '难过也没关系，我陪你待一会儿。',
+    '你已经做得很好了，是时候歇一歇了。',
+    '把烦恼交给这段音乐吧，我在听。',
+    '你值得被温柔对待，也包括被你自己。',
+    '森林里的风，会慢慢吹散烦恼的。',
+    '不必勉强微笑，我都懂的。',
+    '你不是一个人，我一直在你身边。'
+  ];
+  const HEAL_EN = [
+    "It's okay. Take your time — I'm right here.",
+    "You've done enough today. Be gentle with yourself.",
+    "Breathe. In this moment, you are safe.",
+    "It's alright to feel down — I'll stay with you.",
+    "You're doing great. Time to rest a little.",
+    "Let the music hold your worries. I'm listening.",
+    "You deserve tenderness — from yourself, too.",
+    "The forest breeze will carry your worries away.",
+    "You don't have to smile if you can't. I understand.",
+    "You're not alone. I'm right here beside you."
+  ];
+  const speech = document.getElementById('buddy-speech');
+  let lastIdx = -1;
+  buddy.addEventListener('click', () => {
+    if (!speech) return;
+    const ph = (document.querySelector('#emoti-summary textarea') || {}).placeholder || '';
+    const list = /[\\u4e00-\\u9fa5]/.test(ph) ? HEAL_ZH : HEAL_EN;
+    let i = Math.floor(Math.random() * list.length);
+    if (list.length > 1) { while (i === lastIdx) i = Math.floor(Math.random() * list.length); }
+    lastIdx = i;
+    speech.textContent = list[i];
+    speech.classList.add('show');
+    buddy.classList.add('buddy-speak');
+    clearTimeout(buddy._speechT);
+    buddy._speechT = setTimeout(() => {
+      speech.classList.remove('show');
+      buddy.classList.remove('buddy-speak');
+    }, 4200);
+  });
+}
+"""
+
 EMOTI_THEME = gr.themes.Soft(
-    primary_hue=gr.themes.colors.violet,
-    secondary_hue=gr.themes.colors.pink,
-    neutral_hue=gr.themes.colors.slate,
+    primary_hue=gr.themes.colors.green,
+    secondary_hue=gr.themes.colors.orange,
+    neutral_hue=gr.themes.colors.stone,
     radius_size=gr.themes.sizes.radius_lg,
     font=[gr.themes.GoogleFont("Outfit"), gr.themes.GoogleFont("Noto Sans SC"),
           "system-ui", "sans-serif"],
@@ -866,14 +1014,16 @@ footer { display: none !important; }        /* 隐藏 gradio 默认页脚 */
 
 /* ---------- 页面底色 ---------- */
 body, .gradio-container {
-    background: linear-gradient(180deg, #f7f5ff 0%, #fdf4fa 55%, #f2f8ff 100%) !important;
+    background: linear-gradient(180deg, #FBF5DD 0%, #E7E1B1 22%, #B0BA99 50%, #9D6638 80%, #4E220F 100%) !important;
 }
 .dark body, .dark .gradio-container {
-    background: linear-gradient(180deg, #131020 0%, #1a1226 55%, #10131f 100%) !important;
+    background: linear-gradient(180deg, #2b331f 0%, #222a16 52%, #2c1c0e 100%) !important;
 }
-.gradio-container { max-width: 1140px !important; margin: 0 auto !important; position: relative; }
+.gradio-container { max-width: min(1780px, 95vw) !important; margin: 0 auto !important; position: relative; }
 /* 让内容层始终盖在装饰光斑之上 */
 .gradio-container > * { position: relative; z-index: 1; }
+/* 双栏主区：左右两栏留出呼吸间距，顶端对齐 */
+.emoti-main { gap: 22px !important; align-items: flex-start !important; }
 
 /* ---------- 两团缓慢漂移的极光光斑（固定，不随滚动） ---------- */
 .gradio-container::before, .gradio-container::after {
@@ -887,12 +1037,12 @@ body, .gradio-container {
     pointer-events: none;
 }
 .gradio-container::before {
-    background: radial-gradient(circle at 30% 30%, rgba(139,120,255,.38), rgba(255,126,179,.20) 55%, transparent 72%);
+    background: radial-gradient(circle at 30% 30%, rgba(48,109,41,.36), rgba(176,186,153,.22) 55%, transparent 72%);
     top: -22vmax; left: -18vmax;
     animation: emoti-drift-a 26s ease-in-out infinite alternate;
 }
 .gradio-container::after {
-    background: radial-gradient(circle at 70% 70%, rgba(96,165,250,.32), rgba(192,93,240,.18) 55%, transparent 72%);
+    background: radial-gradient(circle at 70% 70%, rgba(13,83,14,.30), rgba(48,109,41,.22) 55%, transparent 72%);
     bottom: -24vmax; right: -20vmax;
     animation: emoti-drift-b 32s ease-in-out infinite alternate;
 }
@@ -911,13 +1061,13 @@ body::after {
 #emoti-hero {
     position: relative;
     overflow: hidden;
-    background: linear-gradient(120deg, #6d5dfc, #a45de2, #ff7eb3, #5da9fc, #6d5dfc);
+    background: linear-gradient(120deg, #0D530E, #306D29, #6f9e56, #B0BA99, #0D530E);
     background-size: 340% 340%;
     animation: emoti-flow 16s ease infinite;
-    border-radius: 28px;
-    padding: 46px 40px 38px;
+    border-radius: 24px;
+    padding: 18px 40px 16px;
     text-align: center;
-    box-shadow: 0 20px 50px rgba(109,93,252,.30), inset 0 1px 0 rgba(255,255,255,.35);
+    box-shadow: 0 18px 44px rgba(13,83,14,.30), inset 0 1px 0 rgba(255,255,255,.30);
     margin-bottom: 4px;
 }
 @keyframes emoti-flow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -930,13 +1080,13 @@ body::after {
                       animation: emoti-float 9s ease-in-out 1.2s infinite; }
 @keyframes emoti-float { 0%,100% { transform: translateY(0) rotate(-6deg); }
                          50%     { transform: translateY(-14px) rotate(8deg); } }
-#emoti-hero h1 { color: #fff !important; font-size: 2.6rem; font-weight: 700;
-                 letter-spacing: .04em; margin: 0 0 .2em;
+#emoti-hero h1 { color: #fff !important; font-size: 1.95rem; font-weight: 700;
+                 letter-spacing: .04em; margin: 0 0 .08em;
                  text-shadow: 0 2px 16px rgba(0,0,0,.20); }
 #emoti-hero h3 { color: rgba(255,255,255,.95) !important; font-weight: 500;
-                 font-size: 1.25rem; margin: 0 0 .6em; letter-spacing: .02em; }
+                 font-size: 1.02rem; margin: 0 0 .25em; letter-spacing: .02em; }
 #emoti-hero p, #emoti-hero li { color: rgba(255,255,255,.90) !important;
-                 max-width: 640px; margin: .35em auto 0; font-size: 1.04rem; line-height: 1.8; }
+                 max-width: 780px; margin: .15em auto 0; font-size: .9rem; line-height: 1.45; }
 #emoti-hero em { color: rgba(255,255,255,.75) !important; font-size: .9rem; }
 #emoti-hero strong { color: #fff !important; }
 
@@ -947,7 +1097,7 @@ body::after {
     -webkit-backdrop-filter: blur(18px) saturate(1.3);
     border: 1px solid rgba(255, 255, 255, .80) !important;
     border-radius: 24px !important;
-    box-shadow: 0 12px 32px rgba(92, 80, 180, .10) !important;
+    box-shadow: 0 12px 32px rgba(13, 83, 14, .12) !important;
     padding: 12px !important;
 }
 .dark .emoti-card {
@@ -967,16 +1117,16 @@ body::after {
     border-radius: 24px !important;
     background:
         linear-gradient(rgba(255,255,255,.94), rgba(255,255,255,.94)) padding-box,
-        linear-gradient(120deg, #8b78ff, #ff7eb3, #60a5fa, #8b78ff) border-box !important;
+        linear-gradient(120deg, #306D29, #6f9e56, #B0BA99, #306D29) border-box !important;
     background-size: 100% 100%, 300% 300% !important;
     animation: emoti-border 10s linear infinite;
-    box-shadow: 0 16px 38px rgba(124, 107, 255, .16) !important;
+    box-shadow: 0 16px 38px rgba(48, 109, 41, .18) !important;
     padding: 6px 10px !important;
 }
 .dark #emoti-summary {
     background:
         linear-gradient(rgba(26,20,38,.94), rgba(26,20,38,.94)) padding-box,
-        linear-gradient(120deg, #8b78ff, #ff7eb3, #60a5fa, #8b78ff) border-box !important;
+        linear-gradient(120deg, #306D29, #6f9e56, #B0BA99, #306D29) border-box !important;
     background-size: 100% 100%, 300% 300% !important;
 }
 @keyframes emoti-border { 0% { background-position: 0 0, 0% 50%; } 100% { background-position: 0 0, 300% 50%; } }
@@ -993,21 +1143,21 @@ body::after {
     animation: emoti-breathe 5.5s ease-in-out infinite;
 }
 @keyframes emoti-breathe {
-    0%, 100% { box-shadow: 0 12px 32px rgba(109, 93, 252, .16); }
-    50%      { box-shadow: 0 12px 48px rgba(255, 126, 179, .32); }
+    0%, 100% { box-shadow: 0 12px 32px rgba(48, 109, 41, .16); }
+    50%      { box-shadow: 0 12px 48px rgba(111, 158, 86, .34); }
 }
 #emoti-music label span { font-size: 1.02rem !important; font-weight: 700 !important; }
 
 /* ---------- 主按钮：渐变 + 悬浮流光扫过 ---------- */
 #emoti-run-btn {
     position: relative; overflow: hidden;
-    background: linear-gradient(135deg, #7c6bff 0%, #c05df0 55%, #ff7eb3 100%) !important;
+    background: linear-gradient(135deg, #306D29 0%, #0D530E 55%, #245a1e 100%) !important;
     color: #fff !important;
     border: none !important;
     border-radius: 16px !important;
     font-weight: 600; font-size: 1.02rem; letter-spacing: .04em;
     padding: 12px 18px !important;
-    box-shadow: 0 10px 26px rgba(150, 90, 240, .34);
+    box-shadow: 0 10px 26px rgba(13, 83, 14, .34);
     transition: transform .16s ease, box-shadow .16s ease;
 }
 #emoti-run-btn::after {                     /* 流光扫过 */
@@ -1018,14 +1168,14 @@ body::after {
     transition: left .5s ease;
 }
 #emoti-run-btn:hover { transform: translateY(-2px);
-                       box-shadow: 0 16px 34px rgba(150, 90, 240, .46); }
+                       box-shadow: 0 16px 34px rgba(13, 83, 14, .46); }
 #emoti-run-btn:hover::after { left: 130%; }
 #emoti-run-btn:active { transform: translateY(0); }
 
 /* ---------- 底部研究/调试折叠区：刻意弱化，让给主角 ---------- */
 #emoti-details {
     border-radius: 18px !important;
-    border: 1px dashed rgba(124, 107, 255, .28) !important;
+    border: 1px dashed rgba(48, 109, 41, .30) !important;
     background: rgba(255, 255, 255, .30) !important;
     opacity: .82;
     transition: opacity .2s ease;
@@ -1038,8 +1188,79 @@ body::after {
 /* ---------- 提示文字与滚动条细节 ---------- */
 #emoti-note-auto p, #emoti-note-manual p { opacity: .82; font-size: .96rem; line-height: 1.8; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: rgba(124,107,255,.30); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(124,107,255,.50); }
+::-webkit-scrollbar-thumb { background: rgba(48,109,41,.32); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(48,109,41,.52); }
+
+/* ========== 右下角陪伴小精灵 EmotiBuddy（会随情绪变表情） ========== */
+#emoti-buddy { position: fixed; right: 30px; bottom: 22px; width: 176px; z-index: 60;
+    cursor: pointer; text-align: center; -webkit-tap-highlight-color: transparent;
+    filter: drop-shadow(0 12px 20px rgba(13,83,14,.30)); transition: transform .15s ease; }
+#emoti-buddy:hover { transform: scale(1.05); }
+#emoti-buddy:active { transform: scale(.96); }
+/* 点击小精灵弹出的「治愈小气泡」 */
+#emoti-buddy .buddy-speech {
+    position: absolute; bottom: 100%; right: 10px; margin-bottom: 6px;
+    max-width: 232px; width: max-content; text-align: left;
+    background: rgba(255,253,246,.97); color: #3f2a17;
+    border: 1.5px solid rgba(48,109,41,.38);
+    border-radius: 16px 16px 5px 16px;
+    padding: 10px 14px; font-size: .88rem; line-height: 1.5; font-weight: 500;
+    box-shadow: 0 10px 24px rgba(13,83,14,.20);
+    opacity: 0; transform: translateY(6px) scale(.95); transform-origin: bottom right;
+    transition: opacity .25s ease, transform .25s ease; pointer-events: none;
+}
+#emoti-buddy .buddy-speech.show { opacity: 1; transform: translateY(0) scale(1); }
+.dark #emoti-buddy .buddy-speech { background: rgba(40,32,22,.97); color: #f0e6d6; border-color: rgba(111,158,86,.4); }
+#emoti-buddy .buddy-bob { animation: buddy-bob 4.2s ease-in-out infinite; }
+#emoti-buddy svg { width: 100%; height: auto; display: block; }
+#emoti-buddy .buddy-name { font-size: .72rem; font-weight: 700; letter-spacing: .05em;
+    color: #2f5e22; margin-top: 1px; opacity: .85; }
+@keyframes buddy-bob { 0%,100% { transform: translateY(0) rotate(-1.6deg); }
+                       50%     { transform: translateY(-9px) rotate(1.6deg); } }
+#emoti-buddy .eyes-open { animation: buddy-blink 5.6s infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes buddy-blink { 0%,94%,100% { transform: scaleY(1); } 97% { transform: scaleY(.12); } }
+/* 默认 neutral：隐藏其余表情部件 */
+#emoti-buddy .eyes-happy, #emoti-buddy .brow-serious, #emoti-buddy .tear,
+#emoti-buddy .mouth-happy, #emoti-buddy .mouth-sad,
+#emoti-buddy .mouth-surprise, #emoti-buddy .mouth-serious { display: none; }
+/* happy：弯眼 + 大笑 */
+#emoti-buddy[data-mood="happy"] .eyes-open { display: none; }
+#emoti-buddy[data-mood="happy"] .eyes-happy { display: block; }
+#emoti-buddy[data-mood="happy"] .mouth-neutral { display: none; }
+#emoti-buddy[data-mood="happy"] .mouth-happy { display: block; }
+/* sad：下弧嘴 + 泪滴 */
+#emoti-buddy[data-mood="sad"] .mouth-neutral { display: none; }
+#emoti-buddy[data-mood="sad"] .mouth-sad { display: block; }
+#emoti-buddy[data-mood="sad"] .tear { display: block; animation: buddy-tear 2.6s ease-in infinite; }
+@keyframes buddy-tear { 0% { opacity: 0; transform: translateY(0); } 25% { opacity: 1; }
+                        100% { opacity: 0; transform: translateY(15px); } }
+/* surprise：O 型嘴 */
+#emoti-buddy[data-mood="surprise"] .mouth-neutral { display: none; }
+#emoti-buddy[data-mood="surprise"] .mouth-surprise { display: block; }
+/* serious（angry/disgust）：皱眉 + 平嘴 */
+#emoti-buddy[data-mood="serious"] .mouth-neutral { display: none; }
+#emoti-buddy[data-mood="serious"] .mouth-serious { display: block; }
+#emoti-buddy[data-mood="serious"] .brow-serious { display: block; }
+/* 出新话时轻轻弹一下（像在说话） */
+#emoti-buddy.buddy-speak .buddy-bob { animation: buddy-speak .5s ease 2; }
+@keyframes buddy-speak { 0%,100% { transform: translateY(0) scale(1); }
+                         50%     { transform: translateY(-5px) scale(1.07); } }
+
+/* ========== 把「给你的话」变成漫画对话气泡（尾巴指向小精灵） ========== */
+#emoti-summary { position: relative; overflow: visible !important; }
+#emoti-summary::after {
+    content: ""; position: absolute; right: 48px; bottom: -14px;
+    width: 0; height: 0; border: 15px solid transparent;
+    border-top-color: rgba(255,255,255,.94); border-bottom: 0;
+    filter: drop-shadow(0 5px 4px rgba(13,83,14,.10));
+}
+.dark #emoti-summary::after { border-top-color: rgba(26,20,38,.94); }
+
+/* 窄屏 / 移动端隐藏小精灵与尾巴，避免遮挡 */
+@media (max-width: 860px) {
+    #emoti-buddy { display: none; }
+    #emoti-summary::after { display: none; }
+}
 """
 
 
@@ -1056,79 +1277,75 @@ def build_ui():
         audio_buf = gr.State([])     # 麦克风流式音频缓冲（numpy chunk 列表）
         summary_ctx = gr.State(None) # 上一次摘要的最小上下文，切语言时即时重刷用
 
-        # ---------------- 控制区（卡片包装）----------------
-        # 只放用户真正会关心的三项：使用方式 / 音乐时长 / 语言。
-        # 「推理模式」偏研究对比，移到底部技术折叠区，避免干扰普通用户。
-        with gr.Group(elem_classes=["emoti-card"]):
-            with gr.Row(elem_classes=["emoti-controls"]):
-                # 单选框统一用 (显示文本, 稳定值)：显示随语言变，value 恒定，所有解析逻辑不受影响。
-                mode = gr.Radio(t0["mode_choices"], value="manual",
-                                label=t0["mode_label"], info=t0["mode_info"])
-
-                # 全局语言开关：默认英文，选中文后整个界面 + 给用户的话 + 标签都变中文（立即生效）。
-                summary_lang = gr.Radio(t0["lang_choices"], value="en",
-                                        label=t0["lang_label"], info=t0["lang_info"])
-
-            music_duration = gr.Slider(
-                minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
-                value=MUSIC_DEFAULT_DURATION_SEC,
-                label=t0["duration_label"], info=t0["duration_info"])
-
         # 会话标签与语音后端不再作为可见控件：固定为 test / 环境默认，用隐藏 State 承载，
         # 保持各回调 inputs 的位置不变（值照常流入函数）。
         session_label = gr.State("test")
         speech_mode = gr.State(_speech_mode_value_from_env())
 
-        # ---------------- 自动模式区 ----------------
-        with gr.Group(visible=False, elem_classes=["emoti-card"]) as auto_group:
-            # 摄像头 · 麦克风 · ⑦ GradCAM 热力图 并排（统一缩小）。
-            # 包在默认展开的 Accordion 里：不想看到画面时可点标题收起（采集照常进行）。
-            with gr.Accordion(t0["auto_media_acc_label"], open=True) as auto_media_acc:
-                with gr.Row(equal_height=True):
-                    auto_cam = gr.Image(label=t0["auto_cam_label"],
-                                        type="numpy", sources=["webcam"], streaming=True, height=240)
-                    auto_mic = gr.Audio(label=t0["auto_mic_label"],
-                                        type="numpy", sources=["microphone"], streaming=True)
-                    heatmap_auto = gr.Image(label=t0["heatmap_label"], height=240)
-            auto_note_md = gr.Markdown(t0["auto_note"], elem_id="emoti-note-auto")
+        # ================= 双栏主区 =================
+        # 左栏（宽）：控制 + 录制媒体（3 图并排需要宽度）；右栏（窄）：给你的话 + 音乐 + 技术折叠。
+        # 只是把原有组件分进两栏——组件定义与所有事件绑定一字未动，故行为完全不变。
+        with gr.Row(elem_classes=["emoti-main"], equal_height=False):
 
-        # ---------------- 手动模式区（视频版：录制 → 抽帧+分离音频 → 单次 pipeline）----------------
-        with gr.Group(visible=True, elem_classes=["emoti-card"]) as manual_group:
-            manual_note_md = gr.Markdown(t0["manual_note"], elem_id="emoti-note-manual")
-            # 录制视频 · 随机抽取的输入帧 · ⑦ GradCAM 热力图 并排（统一缩小，避免过于突兀）。
-            # 同样包在默认展开的 Accordion 里，可随时收起。
-            with gr.Accordion(t0["manual_media_acc_label"], open=True) as manual_media_acc:
-                with gr.Row(equal_height=True):
-                    man_video = gr.Video(label=t0["man_video_label"],
-                                         sources=["webcam"], include_audio=True, height=240,
-                                         webcam_options=gr.WebcamOptions(mirror=False))
-                    man_frame = gr.Image(label=t0["man_frame_label"], type="numpy", height=240)
-                    heatmap_manual = gr.Image(label=t0["heatmap_label"], height=240)
-            run_btn = gr.Button(t0["run_btn_label"], variant="primary", elem_id="emoti-run-btn")
+            # ---------------- 左栏：控制 + 录制 ----------------
+            with gr.Column(scale=6, min_width=480):
+                # 控制区（卡片包装）：使用方式 / 音乐时长 / 语言。「推理模式」偏研究，放右栏折叠区。
+                with gr.Group(elem_classes=["emoti-card"]):
+                    with gr.Row(elem_classes=["emoti-controls"]):
+                        # 单选框统一用 (显示文本, 稳定值)：显示随语言变，value 恒定，解析逻辑不受影响。
+                        mode = gr.Radio(t0["mode_choices"], value="manual",
+                                        label=t0["mode_label"], info=t0["mode_info"])
+                        summary_lang = gr.Radio(t0["lang_choices"], value="en",
+                                                label=t0["lang_label"], info=t0["lang_info"])
+                    music_duration = gr.Slider(
+                        minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
+                        value=MUSIC_DEFAULT_DURATION_SEC,
+                        label=t0["duration_label"], info=t0["duration_info"])
 
-        # ---------------- 输出区（两模式共用）----------------
-        # 面向用户的友好摘要：由大模型生成（未配置 LLM 后端时回退模板），显眼常显。
-        summary_out = gr.Textbox(label=t0["summary_label"], lines=3, interactive=False,
-                                 placeholder=t0["summary_placeholder"],
-                                 elem_id="emoti-summary")
+                # 自动模式区：摄像头 · 麦克风 · ⑦ GradCAM 并排，包在可收起的 Accordion 里。
+                with gr.Group(visible=False, elem_classes=["emoti-card"]) as auto_group:
+                    with gr.Accordion(t0["auto_media_acc_label"], open=True) as auto_media_acc:
+                        with gr.Row(equal_height=True):
+                            auto_cam = gr.Image(label=t0["auto_cam_label"],
+                                                type="numpy", sources=["webcam"], streaming=True, height=200)
+                            auto_mic = gr.Audio(label=t0["auto_mic_label"],
+                                                type="numpy", sources=["microphone"], streaming=True)
+                            heatmap_auto = gr.Image(label=t0["heatmap_label"], height=200)
+                    auto_note_md = gr.Markdown(t0["auto_note"], elem_id="emoti-note-auto")
 
-        # 中间产物（①②③ 感知 / ④ 融合 / ⑤ 推理）默认收起：一般用户不需要看，需要时展开。
-        # 「推理模式」也一并放进来——它偏研究对比，普通用户用默认即可。
-        with gr.Accordion(t0["accordion_label"], open=False,
-                          elem_id="emoti-details") as details_accordion:
-            reasoning_mode = gr.Radio(t0["reasoning_choices"], value="tom_cot",
-                                      label=t0["reasoning_label"], info=t0["reasoning_info"])
-            perception_out = gr.Code(label=t0["perception_label"], language="json")
-            fusion_out = gr.Code(label=t0["fusion_label"], language="json")
-            reasoning_out = gr.Textbox(label=t0["reasoning_out_label"], lines=8)
+                # 手动模式区（视频版：录制 → 抽帧+分离音频 → 单次 pipeline）。
+                with gr.Group(visible=True, elem_classes=["emoti-card"]) as manual_group:
+                    manual_note_md = gr.Markdown(t0["manual_note"], elem_id="emoti-note-manual")
+                    with gr.Accordion(t0["manual_media_acc_label"], open=True) as manual_media_acc:
+                        with gr.Row(equal_height=True):
+                            man_video = gr.Video(label=t0["man_video_label"],
+                                                 sources=["webcam"], include_audio=True, height=200,
+                                                 webcam_options=gr.WebcamOptions(mirror=False))
+                            man_frame = gr.Image(label=t0["man_frame_label"], type="numpy", height=200)
+                            heatmap_manual = gr.Image(label=t0["heatmap_label"], height=200)
+                    run_btn = gr.Button(t0["run_btn_label"], variant="primary", elem_id="emoti-run-btn")
 
-        with gr.Group(elem_classes=["emoti-card"], elem_id="emoti-music"):
-            # loop=True：一段播完自动从头重播 → 自动模式下「音乐不断」。
-            # 下一段还在生成时旧的一直循环；新音乐推过来时播放器自动换成新的。
-            # 状态不变被跳过（gr.skip()）时播放器不被触碰，循环也不中断。
-            music_out = gr.Audio(label=t0["music_label"], autoplay=True, loop=True)
-            # 第二个播放器：只在 Both 模式出现，默认隐藏；不 autoplay，避免与上面重叠出声。
-            music_out_2 = gr.Audio(label=t0["music2_label"], autoplay=False, visible=False)
+            # ---------------- 右栏：给你的话 + 音乐 + 技术折叠 ----------------
+            with gr.Column(scale=4, min_width=360):
+                # 面向用户的友好摘要：由大模型生成（未配置 LLM 后端时回退模板），显眼常显。
+                summary_out = gr.Textbox(label=t0["summary_label"], lines=3, interactive=False,
+                                         placeholder=t0["summary_placeholder"],
+                                         elem_id="emoti-summary")
+
+                with gr.Group(elem_classes=["emoti-card"], elem_id="emoti-music"):
+                    # loop=True：一段播完自动从头重播 → 自动模式下「音乐不断」。新音乐推来时自动换。
+                    music_out = gr.Audio(label=t0["music_label"], autoplay=True, loop=True)
+                    # 第二个播放器：只在 Both 模式出现，默认隐藏；不 autoplay，避免重叠出声。
+                    music_out_2 = gr.Audio(label=t0["music2_label"], autoplay=False, visible=False)
+
+                # 中间产物（①②③ 感知 / ④ 融合 / ⑤ 推理）+ 推理模式：默认收起，研究/调试用。
+                with gr.Accordion(t0["accordion_label"], open=False,
+                                  elem_id="emoti-details") as details_accordion:
+                    reasoning_mode = gr.Radio(t0["reasoning_choices"], value="tom_cot",
+                                              label=t0["reasoning_label"], info=t0["reasoning_info"])
+                    perception_out = gr.Code(label=t0["perception_label"], language="json")
+                    fusion_out = gr.Code(label=t0["fusion_label"], language="json", elem_id="emoti-fusion")
+                    reasoning_out = gr.Textbox(label=t0["reasoning_out_label"], lines=8)
 
         # 输出列表按模式区分 heatmap 目标：auto_step 的热力图刷到自动组里的 heatmap_auto，
         # run_manual_video 的刷到手动组里的 heatmap_manual（其余位置完全一致）。
@@ -1242,6 +1459,11 @@ def build_ui():
             ]
 
         summary_lang.change(fn=set_language, inputs=[summary_lang, summary_ctx], outputs=lang_targets)
+
+        # ---------------- 右下角陪伴小精灵 ----------------
+        # 固定定位（CSS position:fixed），放哪都渲染到右下角；表情由 BUDDY_JS 驱动。
+        gr.HTML(BUDDY_HTML)
+        demo.load(js=BUDDY_JS)   # 页面加载时启动表情联动脚本（纯前端，不改任何 pipeline）
 
     return demo
 
