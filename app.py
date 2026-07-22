@@ -557,7 +557,9 @@ def _texts():
     en = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### Your music companion under the stars ✨"
+            "### Your music companion under the stars — AIAA 3800 · HKUST(GZ)\n"
+            "We quietly read your face, voice, and energy level, then compose a piece of "
+            "music just for this moment. No input needed — just be yourself."
         ),
         "mode_label": "How would you like to use it?",
         "mode_info": "",
@@ -599,7 +601,9 @@ def _texts():
     zh = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### 星空下的情绪音乐陪伴 ✨"
+            "### 星空下的情绪音乐陪伴 — AIAA 3800 · 香港科技大学（广州）\n"
+            "我们轻轻感知你的表情、声音和疲劳状态，为此刻的你即兴创作一段音乐。"
+            "不需要任何操作，做自己就好。"
         ),
         "mode_label": "你想怎么使用？",
         "mode_info": "",
