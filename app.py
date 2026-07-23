@@ -557,13 +557,12 @@ def _texts():
     en = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### Your real-time music companion — AIAA 3800 · HKUST(GZ)\n"
-            "We quietly read your face, voice, and energy level, then compose a piece of music "
-            "just for this moment. No input needed — just be yourself."
+            "### Your music companion under the stars — AIAA 3800 · HKUST(GZ)\n"
+            "We quietly read your face, voice, and energy level, then compose a piece of "
+            "music just for this moment. No input needed — just be yourself."
         ),
         "mode_label": "How would you like to use it?",
-        "mode_info": (f"Continuous: camera & mic stay on, music refreshes every {a}s as your mood shifts. "
-                      "One-shot: record a short clip and we'll read it once."),
+        "mode_info": "",
         "mode_choices": [("🔄  Continuous (always on)", "auto"), ("🎬  One-shot (record a clip)", "manual")],
         "reasoning_label": "Reasoning mode",
         "reasoning_info": ("ToM+CoT reads between the lines of your emotional state (recommended). "
@@ -572,17 +571,14 @@ def _texts():
                               ("⚡  Standard — direct mapping (baseline)", "standard"),
                               ("🔬  Both — compare the two", "both")],
         "duration_label": "Music length",
-        "duration_info": (f"How long should the piece be? 0–{mx}s. Longer takes more time to generate. "
-                          "Takes effect on the next run."),
+        "duration_info": "",
         "lang_label": "🌐 Language",
-        "lang_info": "Switch the whole interface and your personal note between English and Chinese.",
+        "lang_info": "",
         "lang_choices": [("English", "en"), ("中文", "zh")],
         "auto_cam_label": f"📷 Camera — captured every {a}s",
         "auto_mic_label": "🎙️ Microphone — listening",
         "auto_media_acc_label": "📹 Live view & attention map (click to hide)",
-        "auto_note": (f"> Continuous mode is **on**. EmotiCompanion checks in every {a}s. "
-                      "The music **loops seamlessly** — it keeps playing while the next piece "
-                      "is being composed, and only switches when your mood shifts."),
+        "auto_note": "",
         "manual_note": ("> **How to use:** tap **● Record** on the video box below, "
                         "say a few words or just sit naturally for a moment, then tap **■ Stop**. "
                         "We'll pick a frame as your face snapshot and separate the audio — "
@@ -605,13 +601,12 @@ def _texts():
     zh = {
         "app_title": (
             "# 🎵 EmotiCompanion\n"
-            "### 你的实时情绪音乐陪伴 — AIAA 3800 · 香港科技大学（广州）\n"
+            "### 星空下的情绪音乐陪伴 — AIAA 3800 · 香港科技大学（广州）\n"
             "我们轻轻感知你的表情、声音和疲劳状态，为此刻的你即兴创作一段音乐。"
             "不需要任何操作，做自己就好。"
         ),
         "mode_label": "你想怎么使用？",
-        "mode_info": (f"持续模式：摄像头和麦克风保持开启，每 {a} 秒感知一次，情绪变化时音乐随之更新。"
-                      "单次模式：录一段短视频，我们读取一次。"),
+        "mode_info": "",
         "mode_choices": [("🔄  持续陪伴（一直开着）", "auto"), ("🎬  单次体验（录一段）", "manual")],
         "reasoning_label": "推理方式",
         "reasoning_info": ("ToM+CoT 会读懂情绪背后的深层需求（推荐）。"
@@ -620,16 +615,14 @@ def _texts():
                               ("⚡  Standard — 直接映射（基线）", "standard"),
                               ("🔬  Both — 两种都生成，对比看看", "both")],
         "duration_label": "音乐时长",
-        "duration_info": (f"这段音乐生成多长？0~{mx}s。越长生成越慢，下一次运行生效。"),
+        "duration_info": "",
         "lang_label": "🌐 语言",
-        "lang_info": "在中/英之间切换整个界面和给你的便签，立即生效。",
+        "lang_info": "",
         "lang_choices": [("English", "en"), ("中文", "zh")],
         "auto_cam_label": f"📷 摄像头 — 每 {a} 秒捕捉一次",
         "auto_mic_label": "🎙️ 麦克风 — 持续聆听",
         "auto_media_acc_label": "📹 实时画面与热力图（点击可收起）",
-        "auto_note": (f"> 持续模式**已开启**。EmotiCompanion 每 {a} 秒悄悄感知一次。"
-                      "音乐**循环不间断**——下一段还在创作时当前音乐持续播放，"
-                      "只有情绪或疲劳变化时才悄悄换成新的。"),
+        "auto_note": "",
         "manual_note": ("> **使用方法：** 点击下方视频框的 **● 录制**，"
                         "说几句话或自然地坐一会儿，再点 **■ 停止**。"
                         "我们会自动抽取一帧作为人脸快照、分离音频，然后完整分析自动开始。"),
@@ -855,66 +848,69 @@ BUDDY_HTML = """
 <div id="emoti-buddy" data-mood="neutral" title="EmotiBuddy · 点我说句话">
   <div id="buddy-speech" class="buddy-speech"></div>
   <div class="buddy-bob">
-  <svg viewBox="0 0 150 178" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="buddyFur" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#b98a56"/>
-        <stop offset="1" stop-color="#8f5e33"/>
-      </linearGradient>
-    </defs>
-    <!-- 落地阴影 -->
-    <ellipse cx="75" cy="172" rx="42" ry="6" fill="rgba(46,30,15,.20)"/>
-    <!-- 毛茸茸尾巴（藏在身体后） -->
-    <ellipse cx="121" cy="132" rx="14" ry="20" fill="#8f5e33" transform="rotate(38 121 132)"/>
-    <ellipse cx="131" cy="118" rx="7" ry="8" fill="#F7F1DE" transform="rotate(38 131 118)"/>
-    <!-- 身体 -->
-    <path d="M75 90 C104 90 117 111 117 137 C117 160 99 171 75 171 C51 171 33 160 33 137 C33 111 46 90 75 90 Z" fill="url(#buddyFur)"/>
-    <ellipse cx="75" cy="141" rx="23" ry="27" fill="#F7F1DE"/>
-    <!-- 小脚 -->
-    <ellipse cx="59" cy="168" rx="12" ry="8" fill="#7d5029"/>
-    <ellipse cx="91" cy="168" rx="12" ry="8" fill="#7d5029"/>
-    <!-- 圆耳朵 -->
-    <circle cx="41" cy="29" r="19" fill="url(#buddyFur)"/>
-    <circle cx="109" cy="29" r="19" fill="url(#buddyFur)"/>
-    <circle cx="41" cy="30" r="10" fill="#e9cfa6"/>
-    <circle cx="109" cy="30" r="10" fill="#e9cfa6"/>
-    <!-- 大头 -->
-    <circle cx="75" cy="57" r="47" fill="url(#buddyFur)"/>
-    <!-- 头顶音符天线（森林绿，呼应音乐） -->
-    <line x1="75" y1="10" x2="75" y2="1" stroke="#0D530E" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="75" cy="1" r="4.5" fill="#306D29"/>
-    <!-- 浅色口鼻区 -->
-    <ellipse cx="75" cy="72" rx="25" ry="20" fill="#F7F1DE"/>
+  <svg viewBox="0 0 172 156" xmlns="http://www.w3.org/2000/svg">
+    <!-- 扫帚（水平微斜） -->
+    <g transform="rotate(-5 86 122)">
+      <rect x="14" y="119" width="128" height="6" rx="3" fill="#6b4a2b"/>
+      <path d="M138 113 L170 106 L168 122 L170 136 L138 129 Z" fill="#d9b24a"/>
+      <path d="M144 114 L143 128 M152 113 L151 130 M160 112 L159 132 M167 110 L166 133" stroke="#b3862c" stroke-width="1.6" stroke-linecap="round"/>
+      <rect x="134" y="112" width="7" height="18" rx="2.5" fill="#7d5a30"/>
+    </g>
+    <!-- 落地光影 -->
+    <ellipse cx="82" cy="150" rx="38" ry="4.5" fill="rgba(4,14,22,.28)"/>
+    <!-- 腿 + 靴 -->
+    <rect x="62" y="110" width="9" height="28" rx="4.5" fill="#0d3d5f"/>
+    <rect x="86" y="110" width="9" height="28" rx="4.5" fill="#0d3d5f"/>
+    <ellipse cx="66" cy="140" rx="9" ry="6" fill="#5a3a1e"/>
+    <ellipse cx="90" cy="140" rx="9" ry="6" fill="#5a3a1e"/>
+    <!-- 身体：深蓝小袍 -->
+    <path d="M78 76 C99 76 108 90 108 107 C108 120 97 127 78 127 C59 127 48 120 48 107 C48 90 57 76 78 76 Z" fill="#0F4C75"/>
+    <circle cx="78" cy="95" r="2.4" fill="#BBE1FA"/>
+    <circle cx="78" cy="106" r="2.4" fill="#BBE1FA"/>
+    <!-- 手臂抓扫帚杆 -->
+    <path d="M54 98 q-12 10 -8 24" stroke="#0F4C75" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <circle cx="47" cy="120" r="6" fill="#f2cdaa"/>
+    <!-- 精灵尖耳 -->
+    <path d="M46 52 L34 45 L49 62 Z" fill="#f2cdaa"/>
+    <path d="M110 52 L122 45 L107 62 Z" fill="#f2cdaa"/>
+    <!-- 头 -->
+    <circle cx="78" cy="56" r="33" fill="#f4d3b0"/>
+    <!-- 帽檐下露一小撮头发 -->
+    <path d="M49 41 Q61 31 75 35 Q68 41 60 43 Q54 43 49 41 Z" fill="#2b2018"/>
+    <!-- 明黄尖帽 -->
+    <ellipse cx="78" cy="37" rx="37" ry="8" fill="#e6b512"/>
+    <path d="M45 37 C52 8 74 -2 92 8 C114 20 122 12 130 4 C126 26 106 36 100 37 Z" fill="#F6C915"/>
+    <circle cx="129" cy="5" r="5.5" fill="#fff6c0"/>
     <!-- 腮红 -->
-    <ellipse class="cheek" cx="45" cy="70" rx="8" ry="5" fill="rgba(224,122,95,.42)"/>
-    <ellipse class="cheek" cx="105" cy="70" rx="8" ry="5" fill="rgba(224,122,95,.42)"/>
+    <ellipse class="cheek" cx="58" cy="66" rx="7" ry="4.5" fill="rgba(240,150,130,.5)"/>
+    <ellipse class="cheek" cx="98" cy="66" rx="7" ry="4.5" fill="rgba(240,150,130,.5)"/>
     <!-- 眼睛：普通 -->
     <g class="eyes-open">
-      <circle cx="57" cy="58" r="6.5" fill="#3a2414"/>
-      <circle cx="93" cy="58" r="6.5" fill="#3a2414"/>
-      <circle cx="59" cy="56" r="2" fill="#fff"/>
-      <circle cx="95" cy="56" r="2" fill="#fff"/>
+      <circle cx="67" cy="56" r="5.5" fill="#24313a"/>
+      <circle cx="89" cy="56" r="5.5" fill="#24313a"/>
+      <circle cx="69" cy="54" r="1.8" fill="#fff"/>
+      <circle cx="91" cy="54" r="1.8" fill="#fff"/>
     </g>
     <!-- 眼睛：弯（happy） -->
     <g class="eyes-happy">
-      <path d="M49 60 Q57 51 65 60" stroke="#3a2414" stroke-width="3.4" fill="none" stroke-linecap="round"/>
-      <path d="M85 60 Q93 51 101 60" stroke="#3a2414" stroke-width="3.4" fill="none" stroke-linecap="round"/>
+      <path d="M60 58 Q67 50 74 58" stroke="#24313a" stroke-width="3.2" fill="none" stroke-linecap="round"/>
+      <path d="M82 58 Q89 50 96 58" stroke="#24313a" stroke-width="3.2" fill="none" stroke-linecap="round"/>
     </g>
     <!-- 眉（serious） -->
     <g class="brow-serious">
-      <path d="M49 47 L64 52" stroke="#3a2414" stroke-width="3" stroke-linecap="round"/>
-      <path d="M101 47 L86 52" stroke="#3a2414" stroke-width="3" stroke-linecap="round"/>
+      <path d="M60 46 L73 50" stroke="#24313a" stroke-width="2.8" stroke-linecap="round"/>
+      <path d="M96 46 L83 50" stroke="#24313a" stroke-width="2.8" stroke-linecap="round"/>
     </g>
-    <!-- 鼻子 -->
-    <ellipse cx="75" cy="74" rx="5.5" ry="4" fill="#4E220F"/>
+    <!-- 小鼻 -->
+    <ellipse cx="78" cy="63" rx="2.4" ry="1.8" fill="#c98f68"/>
     <!-- 嘴（按情绪切换） -->
-    <path class="mouth mouth-neutral" d="M67 84 Q75 90 83 84" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
-    <path class="mouth mouth-happy" d="M62 82 Q75 99 88 82" stroke="#4E220F" stroke-width="3" fill="none" stroke-linecap="round"/>
-    <path class="mouth mouth-sad" d="M66 92 Q75 84 84 92" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
-    <ellipse class="mouth mouth-surprise" cx="75" cy="88" rx="6" ry="8" fill="#4E220F"/>
-    <path class="mouth mouth-serious" d="M66 88 L84 88" stroke="#4E220F" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+    <path class="mouth mouth-neutral" d="M71 70 Q78 75 85 70" stroke="#7a4a33" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <path class="mouth mouth-happy" d="M68 68 Q78 80 88 68" stroke="#7a4a33" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+    <path class="mouth mouth-sad" d="M71 76 Q78 69 85 76" stroke="#7a4a33" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    <ellipse class="mouth mouth-surprise" cx="78" cy="73" rx="4.5" ry="6" fill="#6b3f2a"/>
+    <path class="mouth mouth-serious" d="M71 73 L85 73" stroke="#7a4a33" stroke-width="2.6" fill="none" stroke-linecap="round"/>
     <!-- 泪滴 -->
-    <path class="tear" d="M53 64 q-4 8 0 12 q4 -4 0 -12 Z" fill="#5aa9d6"/>
+    <path class="tear" d="M60 62 q-3.5 7 0 11 q3.5 -3.5 0 -11 Z" fill="#5aa9d6"/>
   </svg>
   </div>
   <div class="buddy-name">EmotiBuddy</div>
@@ -963,7 +959,16 @@ BUDDY_JS = """
     '你值得被温柔对待，也包括被你自己。',
     '森林里的风，会慢慢吹散烦恼的。',
     '不必勉强微笑，我都懂的。',
-    '你不是一个人，我一直在你身边。'
+    '你不是一个人，我一直在你身边。',
+    '就算世界很吵，这里可以很安静。',
+    '慢一点也没关系，星星也是慢慢亮起来的。',
+    '你的每一种情绪，都值得被认真对待。',
+    '累了就靠一会儿，我帮你看着夜空。',
+    '把今天轻轻翻篇吧，明天会更温柔一点。',
+    '你已经很勇敢了，真的。',
+    '想哭就哭吧，我不会走开。',
+    '别对自己太严格，你做得已经够好了。',
+    '一切都会慢慢好起来的，我陪着你。'
   ];
   const HEAL_EN = [
     "It's okay. Take your time — I'm right here.",
@@ -975,7 +980,16 @@ BUDDY_JS = """
     "You deserve tenderness — from yourself, too.",
     "The forest breeze will carry your worries away.",
     "You don't have to smile if you can't. I understand.",
-    "You're not alone. I'm right here beside you."
+    "You're not alone. I'm right here beside you.",
+    "Even when the world is loud, it can be quiet here.",
+    "Slow is okay — even stars light up little by little.",
+    "Every feeling you have deserves to be heard.",
+    "Rest for a while; I'll watch the night sky for you.",
+    "Let today go gently. Tomorrow will be softer.",
+    "You've been so brave. Truly.",
+    "Cry if you need to — I won't walk away.",
+    "Don't be hard on yourself. You're doing enough.",
+    "It will get better, slowly. I'm here with you."
   ];
   const speech = document.getElementById('buddy-speech');
   let lastIdx = -1;
@@ -998,12 +1012,39 @@ BUDDY_JS = """
 }
 """
 
+# 星座层：全屏 SVG，几组星座连线 + 十字光芒亮星（固定背景，z-index 0）。
+CONSTELLATION_HTML = """
+<div id="emoti-sky" aria-hidden="true">
+  <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <g class="cst">
+      <polyline points="120,120 200,150 280,130 360,170 420,150 450,220 380,250"/>
+      <polyline points="1050,120 1120,170 1190,120 1260,175 1330,120"/>
+      <polyline points="200,600 240,650 210,720 360,730 400,660"/>
+      <polyline points="240,650 300,690 360,730"/>
+      <polyline points="1120,680 1180,720 1240,690 1210,760 1150,750 1120,680"/>
+    </g>
+    <g class="star">
+      <circle cx="120" cy="120" r="2.6"/><circle cx="200" cy="150" r="3"/><circle cx="280" cy="130" r="2.2"/><circle cx="360" cy="170" r="2.8"/><circle cx="420" cy="150" r="2.4"/><circle cx="450" cy="220" r="2.6"/><circle cx="380" cy="250" r="2.2"/>
+      <circle cx="1050" cy="120" r="2.6"/><circle cx="1120" cy="170" r="2.8"/><circle cx="1190" cy="120" r="2.4"/><circle cx="1260" cy="175" r="2.8"/><circle cx="1330" cy="120" r="2.6"/>
+      <circle cx="240" cy="650" r="2.4"/><circle cx="300" cy="690" r="2.6"/><circle cx="360" cy="730" r="2.6"/><circle cx="200" cy="600" r="2.2"/><circle cx="210" cy="720" r="2.2"/><circle cx="400" cy="660" r="2.4"/>
+      <circle cx="1120" cy="680" r="2.4"/><circle cx="1180" cy="720" r="2.8"/><circle cx="1240" cy="690" r="2.4"/><circle cx="1210" cy="760" r="2.2"/><circle cx="1150" cy="750" r="2.4"/>
+    </g>
+    <g class="glow">
+      <path d="M700 200 l3 14 l14 3 l-14 3 l-3 14 l-3 -14 l-14 -3 l14 -3 z"/>
+      <path d="M980 520 l2.5 11 l11 2.5 l-11 2.5 l-2.5 11 l-2.5 -11 l-11 -2.5 l11 -2.5 z"/>
+      <path d="M520 430 l2 9 l9 2 l-9 2 l-2 9 l-2 -9 l-9 -2 l9 -2 z"/>
+      <path d="M860 760 l2.5 11 l11 2.5 l-11 2.5 l-2.5 11 l-2.5 -11 l-11 -2.5 l11 -2.5 z"/>
+    </g>
+  </svg>
+</div>
+"""
+
 EMOTI_THEME = gr.themes.Soft(
-    primary_hue=gr.themes.colors.green,
-    secondary_hue=gr.themes.colors.orange,
-    neutral_hue=gr.themes.colors.stone,
+    primary_hue=gr.themes.colors.blue,
+    secondary_hue=gr.themes.colors.sky,
+    neutral_hue=gr.themes.colors.slate,
     radius_size=gr.themes.sizes.radius_lg,
-    font=[gr.themes.GoogleFont("Outfit"), gr.themes.GoogleFont("Noto Sans SC"),
+    font=[gr.themes.GoogleFont("Quicksand"), gr.themes.GoogleFont("Noto Sans SC"),
           "system-ui", "sans-serif"],
 )
 
@@ -1014,12 +1055,26 @@ footer { display: none !important; }        /* 隐藏 gradio 默认页脚 */
 
 /* ---------- 页面底色 ---------- */
 body, .gradio-container {
-    background: linear-gradient(180deg, #FBF5DD 0%, #E7E1B1 22%, #B0BA99 50%, #9D6638 80%, #4E220F 100%) !important;
+    background: linear-gradient(180deg, #22384c 0%, #1B262C 46%, #131b21 100%) !important;
 }
 .dark body, .dark .gradio-container {
-    background: linear-gradient(180deg, #2b331f 0%, #222a16 52%, #2c1c0e 100%) !important;
+    background: linear-gradient(180deg, #1b2a38 0%, #141d24 50%, #0d141a 100%) !important;
 }
 .gradio-container { max-width: min(1780px, 95vw) !important; margin: 0 auto !important; position: relative; }
+/* 覆盖 gradio 的浅色背景变量 → 所有卡片内的容器透明，露出 .emoti-card 深蓝玻璃 */
+.gradio-container, .gradio-container * {
+    --block-background-fill: transparent !important;
+    --block-label-background-fill: transparent !important;
+    --panel-background-fill: transparent !important;
+    --background-fill-primary: transparent !important;
+    --background-fill-secondary: transparent !important;
+    --border-color-primary: rgba(187,225,250,.16) !important;
+    --block-border-color: rgba(187,225,250,.12) !important;
+    --input-background-fill: rgba(10,22,34,.5) !important;
+    --input-background-fill-focus: rgba(20,40,56,.62) !important;
+    --checkbox-background-color: rgba(10,22,34,.5) !important;
+    --checkbox-background-color-selected: #3282B8 !important;
+}
 /* 让内容层始终盖在装饰光斑之上 */
 .gradio-container > * { position: relative; z-index: 1; }
 /* 双栏主区：左右两栏留出呼吸间距，顶端对齐 */
@@ -1031,18 +1086,18 @@ body, .gradio-container {
     position: fixed;
     width: 60vmax; height: 60vmax;
     border-radius: 50%;
-    filter: blur(90px);
-    opacity: .5;
+    filter: blur(80px);
+    opacity: .7;
     z-index: 0;
     pointer-events: none;
 }
 .gradio-container::before {
-    background: radial-gradient(circle at 30% 30%, rgba(48,109,41,.36), rgba(176,186,153,.22) 55%, transparent 72%);
+    background: radial-gradient(circle at 30% 30%, rgba(220,236,255,.5), rgba(150,190,235,.22) 55%, transparent 72%);
     top: -22vmax; left: -18vmax;
     animation: emoti-drift-a 26s ease-in-out infinite alternate;
 }
 .gradio-container::after {
-    background: radial-gradient(circle at 70% 70%, rgba(13,83,14,.30), rgba(48,109,41,.22) 55%, transparent 72%);
+    background: radial-gradient(circle at 70% 70%, rgba(232,242,255,.42), rgba(130,175,225,.2) 55%, transparent 72%);
     bottom: -24vmax; right: -20vmax;
     animation: emoti-drift-b 32s ease-in-out infinite alternate;
 }
@@ -1050,24 +1105,49 @@ body, .gradio-container {
 @keyframes emoti-drift-a { from { transform: translate(0,0) scale(1); }    to { transform: translate(9vmax,6vmax) scale(1.15); } }
 @keyframes emoti-drift-b { from { transform: translate(0,0) scale(1.1); }  to { transform: translate(-8vmax,-7vmax) scale(.95); } }
 
-/* ---------- 细腻胶片噪点，压住渐变的塑料感 ---------- */
+/* ---------- 密集繁星（又密又亮 + 闪烁） ---------- */
 body::after {
-    content: ""; position: fixed; inset: 0; z-index: 2; pointer-events: none;
-    opacity: .035; mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+        radial-gradient(2px 2px at 20px 30px, #ffffff, transparent),
+        radial-gradient(2px 2px at 58px 78px, #ffffff, transparent),
+        radial-gradient(1.7px 1.7px at 104px 42px, #eaf4ff, transparent),
+        radial-gradient(2.5px 2.5px at 146px 100px, #ffffff, transparent),
+        radial-gradient(1.7px 1.7px at 38px 118px, #dcefff, transparent),
+        radial-gradient(2px 2px at 86px 148px, #ffffff, transparent),
+        radial-gradient(1.7px 1.7px at 168px 22px, #ffffff, transparent),
+        radial-gradient(2.3px 2.3px at 126px 126px, #eaf4ff, transparent),
+        radial-gradient(1.7px 1.7px at 8px 68px, #ffffff, transparent),
+        radial-gradient(2px 2px at 76px 12px, #ffffff, transparent),
+        radial-gradient(1.6px 1.6px at 60px 55px, #ffffff, transparent),
+        radial-gradient(2.2px 2.2px at 118px 92px, #ffffff, transparent),
+        radial-gradient(1.6px 1.6px at 30px 100px, #eaf4ff, transparent),
+        radial-gradient(2px 2px at 150px 158px, #ffffff, transparent);
+    background-repeat: repeat; background-size: 165px 165px;
+    opacity: .96; animation: emoti-twinkle 4.5s ease-in-out infinite;
 }
+@keyframes emoti-twinkle { 0%,100% { opacity: .78; } 50% { opacity: 1; } }
+
+/* ---------- 星座层：连线 + 十字光芒亮星 ---------- */
+#emoti-sky { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .92; }
+#emoti-sky svg { width: 100%; height: 100%; display: block; }
+#emoti-sky .cst polyline { fill: none; stroke: rgba(187,225,250,.32);
+    stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+#emoti-sky .star circle { fill: #eaf4ff; }
+#emoti-sky .glow path { fill: #fff; filter: drop-shadow(0 0 5px rgba(200,225,255,.95));
+    animation: emoti-twinkle 3.6s ease-in-out infinite; }
 
 /* ---------- 主视觉：流动渐变横幅 + 漂浮音符 ---------- */
 #emoti-hero {
     position: relative;
     overflow: hidden;
-    background: linear-gradient(120deg, #0D530E, #306D29, #6f9e56, #B0BA99, #0D530E);
+    background: linear-gradient(120deg, #0F4C75, #3282B8, #0F4C75, #1B3a52, #0F4C75);
     background-size: 340% 340%;
     animation: emoti-flow 16s ease infinite;
     border-radius: 24px;
     padding: 18px 40px 16px;
     text-align: center;
-    box-shadow: 0 18px 44px rgba(13,83,14,.30), inset 0 1px 0 rgba(255,255,255,.30);
+    box-shadow: 0 18px 44px rgba(6,20,32,.55), inset 0 1px 0 rgba(255,255,255,.28);
     margin-bottom: 4px;
 }
 @keyframes emoti-flow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -1092,14 +1172,36 @@ body::after {
 
 /* ---------- 玻璃拟态卡片 ---------- */
 .emoti-card {
-    background: rgba(255, 255, 255, .58) !important;
-    backdrop-filter: blur(18px) saturate(1.3);
-    -webkit-backdrop-filter: blur(18px) saturate(1.3);
-    border: 1px solid rgba(255, 255, 255, .80) !important;
+    background: rgba(20, 40, 56, .52) !important;
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    border: 1px solid rgba(187, 225, 250, .18) !important;
     border-radius: 24px !important;
-    box-shadow: 0 12px 32px rgba(13, 83, 14, .12) !important;
+    box-shadow: 0 14px 34px rgba(4, 14, 22, .40) !important;
     padding: 12px !important;
 }
+/* 星空底：文字统一提亮到近白，保证对比度 */
+.gradio-container, .gradio-container .prose,
+.gradio-container label, .gradio-container span, .gradio-container p,
+.gradio-container h2, .gradio-container h3,
+.gradio-container textarea, .gradio-container input, .gradio-container li { color: #eef6ff !important; }
+/* 关键：把 gradio 组件内部的浅色底压成透明，避免星空底上「浅底浅字」看不清 */
+.emoti-card .block, .emoti-card .form, .emoti-card .wrap, .emoti-card fieldset,
+.emoti-card .gr-box, .emoti-card .container,
+.emoti-card input:not([type=range]), .emoti-card textarea, .emoti-card select {
+    background: transparent !important;
+}
+/* 单选选项：未选深玻璃、选中亮蓝 */
+.emoti-card .wrap label { background: rgba(10,22,34,.45) !important; color: #eaf4ff !important;
+    border-color: rgba(187,225,250,.22) !important; }
+.emoti-card .wrap label.selected, .emoti-card input:checked + label {
+    background: rgba(50,130,184,.5) !important; color: #fff !important; }
+/* JSON / 代码块：深底浅字 */
+.gradio-container .cm-editor, .gradio-container .cm-scroller, .gradio-container .cm-content,
+.gradio-container pre, .gradio-container code {
+    background: rgba(8,16,24,.6) !important; color: #cfe4f5 !important; }
+.gradio-container .info, .gradio-container small,
+.gradio-container .label-wrap span { color: #b3d0e6 !important; }
 .dark .emoti-card {
     background: rgba(255, 255, 255, .05) !important;
     border-color: rgba(255, 255, 255, .09) !important;
@@ -1110,29 +1212,59 @@ body::after {
 }
 .emoti-card img, .emoti-card video { border-radius: 16px !important; }
 .emoti-controls { gap: 14px !important; }
+/* 组件标签统一：清晰的中深蓝 pill + 亮字（覆盖「浅蓝白字」与「透明深底」两种糊掉的情况） */
+.gradio-container .label-wrap,
+.gradio-container .block-label,
+.gradio-container [data-testid="block-info"],
+.gradio-container .block-title,
+.gradio-container .block-info,
+.gradio-container span[data-testid="block-title"] {
+    background: rgba(24,56,82,.92) !important;
+    border: 1px solid rgba(187,225,250,.28) !important;
+    border-radius: 10px !important;
+    padding: 4px 12px !important;
+    box-shadow: 0 2px 8px rgba(4,14,22,.3) !important;
+    width: max-content !important; max-width: 100% !important;
+}
+.gradio-container .label-wrap span,
+.gradio-container .block-label span,
+.gradio-container [data-testid="block-info"],
+.gradio-container .block-title,
+.gradio-container .block-info { color: #e8f3ff !important; font-weight: 600 !important; }
+/* Video / Image / Audio 组件的标题（class="label"）也统一成深蓝 pill + 亮字 */
+.gradio-container .label {
+    background: rgba(24,56,82,.92) !important;
+    border: 1px solid rgba(187,225,250,.28) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 2px 8px rgba(4,14,22,.3) !important;
+}
+.gradio-container .label span, .gradio-container .label { color: #e8f3ff !important; font-weight: 600 !important; }
+/* 音乐时长滑块整体收紧一点 */
+#emoti-duration { transform: scale(.9); transform-origin: left center; margin: -4px 0 -2px; }
+#emoti-duration label span { font-size: .88rem !important; }
 
 /* ---------- 「给你的便签」：流光渐变描边 + 信纸质感（视觉主角一号） ---------- */
 #emoti-summary {
     border: 2px solid transparent !important;
     border-radius: 24px !important;
     background:
-        linear-gradient(rgba(255,255,255,.94), rgba(255,255,255,.94)) padding-box,
-        linear-gradient(120deg, #306D29, #6f9e56, #B0BA99, #306D29) border-box !important;
+        linear-gradient(rgba(21,34,46,.92), rgba(21,34,46,.92)) padding-box,
+        linear-gradient(120deg, #3282B8, #BBE1FA, #0F4C75, #3282B8) border-box !important;
     background-size: 100% 100%, 300% 300% !important;
     animation: emoti-border 10s linear infinite;
-    box-shadow: 0 16px 38px rgba(48, 109, 41, .18) !important;
-    padding: 6px 10px !important;
+    box-shadow: 0 16px 38px rgba(6, 20, 32, .42) !important;
+    padding: 3px 9px !important;
 }
 .dark #emoti-summary {
     background:
-        linear-gradient(rgba(26,20,38,.94), rgba(26,20,38,.94)) padding-box,
-        linear-gradient(120deg, #306D29, #6f9e56, #B0BA99, #306D29) border-box !important;
+        linear-gradient(rgba(21,34,46,.92), rgba(21,34,46,.92)) padding-box,
+        linear-gradient(120deg, #3282B8, #BBE1FA, #0F4C75, #3282B8) border-box !important;
     background-size: 100% 100%, 300% 300% !important;
 }
 @keyframes emoti-border { 0% { background-position: 0 0, 0% 50%; } 100% { background-position: 0 0, 300% 50%; } }
 #emoti-summary textarea {
     background: transparent !important; border: none !important;
-    font-size: 1.14rem !important; line-height: 2.0 !important;
+    font-size: .98rem !important; line-height: 1.55 !important;
 }
 #emoti-summary label span { font-size: 1.05rem !important; font-weight: 700 !important;
                             letter-spacing: .02em; }
@@ -1143,21 +1275,23 @@ body::after {
     animation: emoti-breathe 5.5s ease-in-out infinite;
 }
 @keyframes emoti-breathe {
-    0%, 100% { box-shadow: 0 12px 32px rgba(48, 109, 41, .16); }
-    50%      { box-shadow: 0 12px 48px rgba(111, 158, 86, .34); }
+    0%, 100% { box-shadow: 0 12px 32px rgba(50, 130, 184, .18); }
+    50%      { box-shadow: 0 12px 48px rgba(187, 225, 250, .34); }
 }
 #emoti-music label span { font-size: 1.02rem !important; font-weight: 700 !important; }
 
 /* ---------- 主按钮：渐变 + 悬浮流光扫过 ---------- */
 #emoti-run-btn {
     position: relative; overflow: hidden;
-    background: linear-gradient(135deg, #306D29 0%, #0D530E 55%, #245a1e 100%) !important;
-    color: #fff !important;
+    background: linear-gradient(135deg, #BBE1FA 0%, #8ec5e9 100%) !important;
+    color: #0F4C75 !important;
     border: none !important;
-    border-radius: 16px !important;
-    font-weight: 600; font-size: 1.02rem; letter-spacing: .04em;
-    padding: 12px 18px !important;
-    box-shadow: 0 10px 26px rgba(13, 83, 14, .34);
+    border-radius: 14px !important;
+    font-weight: 700; font-size: .94rem; letter-spacing: .03em;
+    padding: 9px 22px !important;
+    display: block !important; width: auto !important; min-width: 190px; max-width: 58%;
+    margin: 10px auto 4px !important;
+    box-shadow: 0 8px 20px rgba(50, 130, 184, .35);
     transition: transform .16s ease, box-shadow .16s ease;
 }
 #emoti-run-btn::after {                     /* 流光扫过 */
@@ -1168,15 +1302,15 @@ body::after {
     transition: left .5s ease;
 }
 #emoti-run-btn:hover { transform: translateY(-2px);
-                       box-shadow: 0 16px 34px rgba(13, 83, 14, .46); }
+                       box-shadow: 0 16px 34px rgba(50, 130, 184, .52); }
 #emoti-run-btn:hover::after { left: 130%; }
 #emoti-run-btn:active { transform: translateY(0); }
 
 /* ---------- 底部研究/调试折叠区：刻意弱化，让给主角 ---------- */
 #emoti-details {
     border-radius: 18px !important;
-    border: 1px dashed rgba(48, 109, 41, .30) !important;
-    background: rgba(255, 255, 255, .30) !important;
+    border: 1px dashed rgba(50, 130, 184, .32) !important;
+    background: rgba(50, 130, 184, .10) !important;
     opacity: .82;
     transition: opacity .2s ease;
     margin-top: 6px;
@@ -1186,35 +1320,38 @@ body::after {
 #emoti-details .label-wrap span { font-size: .92rem !important; opacity: .85; }
 
 /* ---------- 提示文字与滚动条细节 ---------- */
-#emoti-note-auto p, #emoti-note-manual p { opacity: .82; font-size: .96rem; line-height: 1.8; }
+#emoti-note-auto p, #emoti-note-manual p { color: #cfe6fb !important; font-size: .96rem; line-height: 1.8; }
+/* 「How to use / ● Record / ■ Stop」等加粗文字换成醒目的浅蓝 */
+#emoti-note-manual, #emoti-note-manual span, #emoti-note-manual li { color: #cfe6fb !important; }
+#emoti-note-manual strong, #emoti-note-manual b { color: #BBE1FA !important; font-weight: 700 !important; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: rgba(48,109,41,.32); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(48,109,41,.52); }
+::-webkit-scrollbar-thumb { background: rgba(50,130,184,.40); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(50,130,184,.62); }
 
 /* ========== 右下角陪伴小精灵 EmotiBuddy（会随情绪变表情） ========== */
 #emoti-buddy { position: fixed; right: 30px; bottom: 22px; width: 176px; z-index: 60;
     cursor: pointer; text-align: center; -webkit-tap-highlight-color: transparent;
-    filter: drop-shadow(0 12px 20px rgba(13,83,14,.30)); transition: transform .15s ease; }
+    filter: drop-shadow(0 12px 22px rgba(6,20,32,.55)); transition: transform .15s ease; }
 #emoti-buddy:hover { transform: scale(1.05); }
 #emoti-buddy:active { transform: scale(.96); }
 /* 点击小精灵弹出的「治愈小气泡」 */
 #emoti-buddy .buddy-speech {
     position: absolute; bottom: 100%; right: 10px; margin-bottom: 6px;
     max-width: 232px; width: max-content; text-align: left;
-    background: rgba(255,253,246,.97); color: #3f2a17;
-    border: 1.5px solid rgba(48,109,41,.38);
+    background: rgba(21,34,46,.96); color: #e6f2fb;
+    border: 1.5px solid rgba(187,225,250,.42);
     border-radius: 16px 16px 5px 16px;
     padding: 10px 14px; font-size: .88rem; line-height: 1.5; font-weight: 500;
-    box-shadow: 0 10px 24px rgba(13,83,14,.20);
+    box-shadow: 0 10px 24px rgba(4,14,22,.5);
     opacity: 0; transform: translateY(6px) scale(.95); transform-origin: bottom right;
     transition: opacity .25s ease, transform .25s ease; pointer-events: none;
 }
 #emoti-buddy .buddy-speech.show { opacity: 1; transform: translateY(0) scale(1); }
-.dark #emoti-buddy .buddy-speech { background: rgba(40,32,22,.97); color: #f0e6d6; border-color: rgba(111,158,86,.4); }
+.dark #emoti-buddy .buddy-speech { background: rgba(15,26,36,.97); color: #e6f2fb; border-color: rgba(187,225,250,.4); }
 #emoti-buddy .buddy-bob { animation: buddy-bob 4.2s ease-in-out infinite; }
 #emoti-buddy svg { width: 100%; height: auto; display: block; }
 #emoti-buddy .buddy-name { font-size: .72rem; font-weight: 700; letter-spacing: .05em;
-    color: #2f5e22; margin-top: 1px; opacity: .85; }
+    color: #BBE1FA; margin-top: 1px; opacity: .92; }
 @keyframes buddy-bob { 0%,100% { transform: translateY(0) rotate(-1.6deg); }
                        50%     { transform: translateY(-9px) rotate(1.6deg); } }
 #emoti-buddy .eyes-open { animation: buddy-blink 5.6s infinite; transform-box: fill-box; transform-origin: center; }
@@ -1251,10 +1388,10 @@ body::after {
 #emoti-summary::after {
     content: ""; position: absolute; right: 48px; bottom: -14px;
     width: 0; height: 0; border: 15px solid transparent;
-    border-top-color: rgba(255,255,255,.94); border-bottom: 0;
-    filter: drop-shadow(0 5px 4px rgba(13,83,14,.10));
+    border-top-color: rgba(21,34,46,.92); border-bottom: 0;
+    filter: drop-shadow(0 5px 4px rgba(6,20,32,.22));
 }
-.dark #emoti-summary::after { border-top-color: rgba(26,20,38,.94); }
+.dark #emoti-summary::after { border-top-color: rgba(21,34,46,.92); }
 
 /* 窄屏 / 移动端隐藏小精灵与尾巴，避免遮挡 */
 @media (max-width: 860px) {
@@ -1299,7 +1436,7 @@ def build_ui():
                                                 label=t0["lang_label"], info=t0["lang_info"])
                     music_duration = gr.Slider(
                         minimum=0, maximum=MUSIC_MAX_DURATION_SEC, step=1,
-                        value=MUSIC_DEFAULT_DURATION_SEC,
+                        value=MUSIC_DEFAULT_DURATION_SEC, elem_id="emoti-duration",
                         label=t0["duration_label"], info=t0["duration_info"])
 
                 # 自动模式区：摄像头 · 麦克风 · ⑦ GradCAM 并排，包在可收起的 Accordion 里。
@@ -1328,7 +1465,7 @@ def build_ui():
             # ---------------- 右栏：给你的话 + 音乐 + 技术折叠 ----------------
             with gr.Column(scale=4, min_width=360):
                 # 面向用户的友好摘要：由大模型生成（未配置 LLM 后端时回退模板），显眼常显。
-                summary_out = gr.Textbox(label=t0["summary_label"], lines=3, interactive=False,
+                summary_out = gr.Textbox(label=t0["summary_label"], lines=2, interactive=False,
                                          placeholder=t0["summary_placeholder"],
                                          elem_id="emoti-summary")
 
@@ -1462,6 +1599,7 @@ def build_ui():
 
         # ---------------- 右下角陪伴小精灵 ----------------
         # 固定定位（CSS position:fixed），放哪都渲染到右下角；表情由 BUDDY_JS 驱动。
+        gr.HTML(CONSTELLATION_HTML)   # 星座背景层（fixed，z-index 0）
         gr.HTML(BUDDY_HTML)
         demo.load(js=BUDDY_JS)   # 页面加载时启动表情联动脚本（纯前端，不改任何 pipeline）
 
